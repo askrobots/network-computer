@@ -83,3 +83,20 @@ as BlackHole for system audio; linux: a pulse monitor source).
 - uinput injector on Linux, SendInput on Windows.
 - Pairing keys and per-session TURN credentials in the rendezvous.
 - iOS app: libwebrtc, same signaling, AirPlay second screen.
+
+## Internet test, 2026-09-20
+
+Rendezvous and a headless xfce desktop on a DigitalOcean droplet (2 vCPU, no GPU,
+software x264 at 720p30), client on the iMac behind home NAT, browser client.
+
+| Measurement | Result |
+|---|---|
+| ICE path | srflx to host, direct (no relay needed) |
+| RTT | 40 ms |
+| Video | 1280x720, 30 fps, about 6 Mbit/s |
+| Decode | 2.4 ms per frame, jitter buffer 12 ms |
+| Forced TURN relay | connects in 2.7 s, same frame rate |
+| Input | mouse, clicks, keyboard usable, after the two-device uinput fix |
+
+Verdict from the user: works, and is good. Next: the same test with the iPhone app on
+cellular against the iMac host behind home NAT, which is the NAT-to-NAT case.
