@@ -1,0 +1,166 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>nc test client</title>
+<style>
+  html,body{margin:0;background:#111;color:#ddd;font:13px/1.4 -apple-system,system-ui,sans-serif;height:100%}
+  #bar{display:flex;gap:8px;align-items:center;padding:6px 10px;background:#222;flex-wrap:wrap}
+  #bar select,#bar button,#bar input{font:inherit;padding:4px 8px;background:#333;color:#eee;border:1px solid #555;border-radius:4px}
+  #stage{position:relative;height:calc(100% - 38px);display:flex;align-items:center;justify-content:center;background:#000}
+  video{max-width:100%;max-height:100%;outline:none;cursor:none}
+  video.unfocused{cursor:default}
+  #stats{position:absolute;top:8px;left:8px;background:rgba(0,0,0,.6);padding:6px 8px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:12px;white-space:pre;pointer-events:none}
+  #log{position:absolute;bottom:8px;left:8px;max-width:60%;max-height:30%;overflow:auto;background:rgba(0,0,0,.6);padding:6px 8px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:11px;white-space:pre-wrap}
+</style>
+<div id="bar">
+  <select id="hosts"></select>
+  <button id="refresh">refresh</button>
+  <input id="pin" placeholder="host PIN" size="8" inputmode="numeric">
+  <button id="connect">connect</button>
+  <button id="disconnect" disabled>disconnect</button>
+  <label><input type="checkbox" id="grab" checked> grab keyboard/mouse when video focused</label>
+  <label><input type="checkbox" id="relayonly"> force TURN relay</label>
+  <span id="state"></span>
+</div>
+<div id="stage">
+  <video id="v" autoplay playsinline muted tabindex="0" class="unfocused"></video>
+  <div id="stats"></div>
+  <div id="log"></div>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const video = $('v');
+let ws, pc, dc, statsTimer, config;
+
+function log(...a){ const s=a.join(' '); console.log(s); $('log').textContent += s+'\n'; $('log').scrollTop=1e9; }
+function state(s){ $('state').textContent = s; }
+
+function wsURL(){ return (location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws'; }
+
+function openWS(){
+  return new Promise((res,rej)=>{
+    ws = new WebSocket(wsURL());
+    ws.onopen = ()=>res(ws);
+    ws.onerror = e=>rej(e);
+    ws.onmessage = ev => onSignal(JSON.parse(ev.data));
+    ws.onclose = ()=>{ log('signaling closed'); };
+  });
+}
+function send(m){ ws.send(JSON.stringify(m)); }
+
+async function refreshHosts(){
+  const hosts = await (await fetch('/hosts')).json();
+  const sel = $('hosts'); sel.innerHTML='';
+  for (const h of hosts){ const o=document.createElement('option'); o.value=o.textContent=h; sel.appendChild(o); }
+  if (!hosts.length) log('no hosts registered');
+}
+
+let hostName;
+async function connect(){
+  config = await (await fetch('/config')).json();
+  hostName = $('hosts').value;
+  if (!hostName){ log('pick a host'); return; }
+  await openWS();
+  const rtcCfg = { iceServers: config.iceServers };
+  if ($('relayonly').checked) rtcCfg.iceTransportPolicy = 'relay';
+  pc = new RTCPeerConnection(rtcCfg);
+  pc.addTransceiver('video', {direction:'recvonly'});
+  pc.addTransceiver('audio', {direction:'recvonly'});
+  dc = pc.createDataChannel('input', {ordered:false, maxRetransmits:0});
+  dc.onopen = ()=>{ log('input channel open'); };
+  pc.ontrack = ev => { if (ev.track.kind==='video') { video.srcObject = ev.streams[0] || new MediaStream([ev.track]); video.muted=false; } };
+  pc.onicecandidate = ev => { if (ev.candidate) send({type:'ice', to:hostName, candidate: ev.candidate.toJSON()}); };
+  pc.onconnectionstatechange = ()=>{ state(pc.connectionState); log('pc:', pc.connectionState); if (pc.connectionState==='failed'||pc.connectionState==='closed') disconnect(); };
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  send({type:'offer', to:hostName, sdp: offer.sdp, pin: $('pin').value.trim()});
+  $('connect').disabled = true; $('disconnect').disabled = false;
+  statsTimer = setInterval(showStats, 1000);
+}
+
+async function onSignal(m){
+  if (m.type==='answer'){ await pc.setRemoteDescription({type:'answer', sdp:m.sdp}); log('got answer'); }
+  else if (m.type==='ice'){ try { await pc.addIceCandidate(m.candidate); } catch(e){ log('ice err', e); } }
+  else if (m.type==='error'){ log('error:', m.error); if (/PIN/.test(m.error)) disconnect(); }
+}
+
+function disconnect(){
+  clearInterval(statsTimer);
+  if (dc) dc.close(); if (pc) pc.close(); if (ws) ws.close();
+  dc=pc=ws=null; video.srcObject=null; state('');
+  $('connect').disabled=false; $('disconnect').disabled=true;
+}
+
+// ---- stats: what matters for the NAT / latency questions ----
+let last = {bytes:0, frames:0, t:0};
+async function showStats(){
+  if (!pc) return;
+  const r = await pc.getStats();
+  let out = [];
+  let pair, remoteCand, localCand, inbound;
+  const cands = {};
+  r.forEach(s=>{
+    if (s.type==='candidate-pair' && s.state==='succeeded' && s.nominated) pair=s;
+    if (s.type==='local-candidate'||s.type==='remote-candidate') cands[s.id]=s;
+    if (s.type==='inbound-rtp' && s.kind==='video') inbound=s;
+  });
+  if (pair){
+    localCand = cands[pair.localCandidateId]; remoteCand = cands[pair.remoteCandidateId];
+    out.push(`path   ${localCand?.candidateType} -> ${remoteCand?.candidateType}  (${remoteCand?.address||'?'}:${remoteCand?.port||'?'}) ${localCand?.candidateType==='relay'||remoteCand?.candidateType==='relay'?'RELAYED':'direct'}`);
+    out.push(`rtt    ${((pair.currentRoundTripTime||0)*1000).toFixed(1)} ms`);
+  }
+  if (inbound){
+    const now = performance.now();
+    const dt = (now-last.t)/1000;
+    const mbps = (inbound.bytesReceived-last.bytes)*8/dt/1e6;
+    const fps = (inbound.framesDecoded-last.frames)/dt;
+    last = {bytes:inbound.bytesReceived, frames:inbound.framesDecoded, t:now};
+    const dec = inbound.framesDecoded ? (inbound.totalDecodeTime/inbound.framesDecoded*1000).toFixed(1) : '?';
+    const jb = inbound.jitterBufferEmittedCount ? (inbound.jitterBufferDelay/inbound.jitterBufferEmittedCount*1000).toFixed(1) : '?';
+    out.push(`video  ${inbound.frameWidth}x${inbound.frameHeight} ${fps.toFixed(0)} fps  ${mbps.toFixed(1)} Mbit/s  codec ${codecName(r, inbound.codecId)}`);
+    out.push(`decode ${dec} ms/frame   jitterbuf ${jb} ms   lost ${inbound.packetsLost}  pli ${inbound.pliCount}  nack ${inbound.nackCount}`);
+  }
+  $('stats').textContent = out.join('\n');
+}
+function codecName(r, id){ let n='?'; r.forEach(s=>{ if (s.id===id) n=s.mimeType; }); return n; }
+
+// ---- input capture ----
+let grabbing = false;
+function sendInput(e){ if (dc && dc.readyState==='open') dc.send(JSON.stringify(e)); }
+function videoRect(){
+  // account for letterboxing inside the element
+  const r = video.getBoundingClientRect();
+  const vw = video.videoWidth, vh = video.videoHeight;
+  if (!vw || !vh) return r;
+  const scale = Math.min(r.width/vw, r.height/vh);
+  const w = vw*scale, h = vh*scale;
+  return {left: r.left+(r.width-w)/2, top: r.top+(r.height-h)/2, width:w, height:h};
+}
+let pendingMove = null;
+video.addEventListener('mousemove', ev=>{
+  if (!grabbing) return;
+  const r = videoRect();
+  pendingMove = {t:'mm', x: Math.min(1,Math.max(0,(ev.clientX-r.left)/r.width)), y: Math.min(1,Math.max(0,(ev.clientY-r.top)/r.height))};
+});
+(function flush(){ if (pendingMove){ sendInput(pendingMove); pendingMove=null; } requestAnimationFrame(flush); })();
+video.addEventListener('mousedown', ev=>{ video.focus(); if (!grabbing){ setGrab(true); return; } ev.preventDefault(); sendInput({t:'md', b: ev.button}); });
+video.addEventListener('mouseup',   ev=>{ if (grabbing){ ev.preventDefault(); sendInput({t:'mu', b: ev.button}); } });
+video.addEventListener('contextmenu', ev=> ev.preventDefault());
+video.addEventListener('wheel', ev=>{ if (grabbing){ ev.preventDefault(); sendInput({t:'wh', dx: ev.deltaX, dy: ev.deltaY}); } }, {passive:false});
+window.addEventListener('keydown', ev=>{
+  if (!grabbing) return;
+  if (ev.code==='Escape' && ev.shiftKey){ setGrab(false); return; }   // shift+esc releases
+  ev.preventDefault(); if (!ev.repeat) sendInput({t:'kd', code: ev.code});
+});
+window.addEventListener('keyup', ev=>{ if (grabbing){ ev.preventDefault(); sendInput({t:'ku', code: ev.code}); } });
+video.addEventListener('blur', ()=> setGrab(false));
+function setGrab(on){
+  grabbing = on && $('grab').checked;
+  video.classList.toggle('unfocused', !grabbing);
+  log(grabbing ? 'input grabbed (shift+esc to release)' : 'input released');
+}
+
+$('refresh').onclick = refreshHosts;
+$('connect').onclick = connect;
+$('disconnect').onclick = disconnect;
+refreshHosts();
+</script>
