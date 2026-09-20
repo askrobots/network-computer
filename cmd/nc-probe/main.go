@@ -116,6 +116,7 @@ func main() {
 
 	type stats struct {
 		packets, bytes, frames, keyframes int
+		audioPackets, audioBytes          int
 		first                             time.Time
 	}
 	st := &stats{}
@@ -126,9 +127,12 @@ func main() {
 		if track.Kind() != webrtc.RTPCodecTypeVideo {
 			go func() {
 				for {
-					if _, _, err := track.ReadRTP(); err != nil {
+					pkt, _, err := track.ReadRTP()
+					if err != nil {
 						return
 					}
+					st.audioPackets++
+					st.audioBytes += len(pkt.Payload)
 				}
 			}()
 			return
@@ -226,6 +230,11 @@ func main() {
 	}
 	fmt.Printf("video: %d packets, %d frames (%d keyframes), %.1f fps, %.1f Mbit/s over %.1fs\n",
 		st.packets, st.frames, st.keyframes, float64(st.frames)/el, float64(st.bytes)*8/el/1e6, el)
+	if st.audioPackets > 0 {
+		fmt.Printf("audio: %d packets, %.0f kbit/s (opus, ~50 packets/s expected)\n", st.audioPackets, float64(st.audioBytes)*8/el/1e3)
+	} else {
+		fmt.Println("audio: none received (host started without -audio-device, or nothing playing)")
+	}
 }
 
 // isKeyframe checks the H.264 payload for an IDR NAL (single NAL, STAP-A, or FU-A start).

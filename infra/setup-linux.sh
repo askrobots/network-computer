@@ -9,7 +9,31 @@ GO_VERSION=1.27.1
 
 apt-get update -q
 apt-get install -y -q ffmpeg xserver-xorg-core xserver-xorg-video-dummy xserver-xorg-input-evdev \
-  xfce4 xfce4-terminal xterm dbus-x11 git curl ufw
+  xfce4 xfce4-terminal xterm dbus-x11 git curl ufw pulseaudio pulseaudio-utils xdg-utils xdotool
+
+# Firefox as a real deb from Mozilla (Ubuntu's package is a snap stub that misbehaves as root)
+install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://packages.mozilla.org/apt/repo-signing-key.gpg -o /etc/apt/keyrings/packages.mozilla.org.asc
+echo "deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.asc] https://packages.mozilla.org/apt mozilla main" > /etc/apt/sources.list.d/mozilla.list
+printf "Package: *\nPin: origin packages.mozilla.org\nPin-Priority: 1000\n" > /etc/apt/preferences.d/mozilla
+apt-get update -q && apt-get install -y -q firefox
+
+# audio: pulseaudio as a service with a virtual sink; every client finds it via client.conf
+printf "default-server = unix:/run/nc-pulse/native\nautospawn = no\n" > /etc/pulse/client.conf
+rm -f /etc/pulse/client.conf.d/01-enable-autospawn.conf
+cat > /etc/systemd/system/nc-audio.service <<'EOT'
+[Unit]
+Description=pulseaudio with a virtual sink for network-computer
+[Service]
+Environment=HOME=/root
+RuntimeDirectory=nc-pulse
+RuntimeDirectoryMode=0755
+ExecStart=/usr/bin/pulseaudio --daemonize=no --exit-idle-time=-1 --disallow-exit --load="module-native-protocol-unix auth-anonymous=1 socket=/run/nc-pulse/native"
+ExecStartPost=/bin/sh -c "sleep 2; pactl load-module module-null-sink sink_name=nc sink_properties=device.description=network-computer; pactl set-default-sink nc"
+Restart=always
+[Install]
+WantedBy=multi-user.target
+EOT
 
 # Go toolchain (Ubuntu's is too old)
 if ! /usr/local/go/bin/go version 2>/dev/null | grep -q "$GO_VERSION"; then
@@ -106,13 +130,13 @@ EOT
 cat > /etc/systemd/system/nc-host.service <<'EOT'
 [Unit]
 Description=network-computer host (headless desktop)
-After=nc-desktop.service nc-rendezvous.service
+After=nc-desktop.service nc-rendezvous.service nc-audio.service
 Requires=nc-desktop.service
 [Service]
 EnvironmentFile=/etc/nc/env
 Environment=DISPLAY=:0
 ExecStartPre=/bin/sleep 3
-ExecStart=/usr/local/bin/nc-host -rendezvous http://127.0.0.1:8765 -name cloudbox -size 1280x720 -fps 30 -bitrate 4M -encoder libx264
+ExecStart=/usr/local/bin/nc-host -rendezvous http://127.0.0.1:8765 -name cloudbox -size 1280x720 -fps 30 -bitrate 4M -encoder libx264 -audio-device nc.monitor
 Restart=always
 [Install]
 WantedBy=multi-user.target
@@ -126,7 +150,7 @@ ufw allow 49152:65535/udp >/dev/null
 ufw --force enable >/dev/null
 
 systemctl daemon-reload
-systemctl enable --now nc-xorg nc-desktop nc-rendezvous nc-host
+systemctl enable --now nc-xorg nc-desktop nc-audio nc-rendezvous nc-host
 sleep 5
 systemctl --no-pager --lines=3 status nc-rendezvous nc-host | grep -E 'Active|PIN|registered' || true
 echo
