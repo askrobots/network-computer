@@ -110,6 +110,8 @@ Requires=nc-xorg.service
 Environment=DISPLAY=:0
 ExecStartPre=/bin/sleep 2
 ExecStart=/usr/bin/dbus-launch --exit-with-session startxfce4
+# no screen blanking: a blank X screen streams as black video
+ExecStartPost=/bin/sh -c "sleep 3; xset s off s noblank"
 Restart=always
 [Install]
 WantedBy=multi-user.target
