@@ -71,15 +71,32 @@ type uinputAbsSetup struct {
 	Value, Minimum, Maximum, Fuzz, Flat, Resolution int32
 }
 
+// Two devices, because libinput treats anything with relative axes as a mouse
+// and ignores its absolute events. "kbd" is a keyboard plus relative mouse and
+// wheel; "tab" is an absolute pointer shaped like the QEMU USB tablet.
 type linux struct {
 	mu       sync.Mutex
-	f        *os.File
-	x, y     float64 // last absolute position, 0..1
+	kbd, tab *os.File
 	heldKeys map[uint16]bool
 	buttons  [3]bool
 }
 
 func newPlatform(display int) (Injector, error) {
+	kbd, err := createDevice("network-computer keyboard+mouse", false)
+	if err != nil {
+		return nil, err
+	}
+	tab, err := createDevice("network-computer tablet", true)
+	if err != nil {
+		kbd.Close()
+		return nil, err
+	}
+	time.Sleep(300 * time.Millisecond) // let the display server pick the devices up
+	log.Printf("input: uinput devices created")
+	return &linux{kbd: kbd, tab: tab, heldKeys: map[uint16]bool{}}, nil
+}
+
+func createDevice(name string, absolute bool) (*os.File, error) {
 	f, err := os.OpenFile("/dev/uinput", os.O_WRONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, fmt.Errorf("open /dev/uinput: %w (run as root or add a udev rule)", err)
@@ -96,25 +113,28 @@ func newPlatform(display int) (Injector, error) {
 		}
 	}
 	must(ioctl(uiSetEvBit, evKey))
-	must(ioctl(uiSetEvBit, evRel))
-	must(ioctl(uiSetEvBit, evAbs))
 	must(ioctl(uiSetEvBit, evSyn))
 	for _, b := range []uintptr{btnLeft, btnRight, btnMiddle} {
 		must(ioctl(uiSetKeyBit, b))
 	}
-	for k := uintptr(1); k < 256; k++ { // all ordinary keyboard keycodes
-		must(ioctl(uiSetKeyBit, k))
-	}
-	for _, r := range []uintptr{relX, relY, relWheel, relHWheel} {
-		must(ioctl(uiSetRelBit, r))
-	}
-	for _, a := range []uint16{absX, absY} {
-		must(ioctl(uiSetAbsBit, uintptr(a)))
-		as := uinputAbsSetup{Code: a, Minimum: 0, Maximum: absRange}
-		must(ioctl(uiAbsSetup, uintptr(unsafe.Pointer(&as))))
+	if absolute {
+		must(ioctl(uiSetEvBit, evAbs))
+		for _, a := range []uint16{absX, absY} {
+			must(ioctl(uiSetAbsBit, uintptr(a)))
+			as := uinputAbsSetup{Code: a, Minimum: 0, Maximum: absRange}
+			must(ioctl(uiAbsSetup, uintptr(unsafe.Pointer(&as))))
+		}
+	} else {
+		must(ioctl(uiSetEvBit, evRel))
+		for k := uintptr(1); k < 256; k++ { // all ordinary keyboard keycodes
+			must(ioctl(uiSetKeyBit, k))
+		}
+		for _, r := range []uintptr{relX, relY, relWheel, relHWheel} {
+			must(ioctl(uiSetRelBit, r))
+		}
 	}
 	us := uinputSetup{Bustype: 0x03, Vendor: 0x1d6b, Product: 0x0104, Version: 1}
-	copy(us.Name[:], "network-computer virtual input")
+	copy(us.Name[:], name)
 	if err := ioctl(uiDevSetup, uintptr(unsafe.Pointer(&us))); err != nil {
 		f.Close()
 		return nil, fmt.Errorf("UI_DEV_SETUP: %w", err)
@@ -123,12 +143,10 @@ func newPlatform(display int) (Injector, error) {
 		f.Close()
 		return nil, fmt.Errorf("UI_DEV_CREATE: %w", err)
 	}
-	time.Sleep(300 * time.Millisecond) // let the display server pick the device up
-	log.Printf("input: uinput device created")
-	return &linux{f: f, heldKeys: map[uint16]bool{}}, nil
+	return f, nil
 }
 
-func (l *linux) emit(typ, code uint16, val int32) {
+func (l *linux) emit(f *os.File, typ, code uint16, val int32) {
 	ev := inputEvent{Type: typ, Code: code, Value: val}
 	buf := make([]byte, unsafe.Sizeof(ev))
 	binary.LittleEndian.PutUint64(buf[0:], uint64(ev.Sec))
@@ -136,24 +154,23 @@ func (l *linux) emit(typ, code uint16, val int32) {
 	binary.LittleEndian.PutUint16(buf[16:], ev.Type)
 	binary.LittleEndian.PutUint16(buf[18:], ev.Code)
 	binary.LittleEndian.PutUint32(buf[20:], uint32(ev.Value))
-	l.f.Write(buf)
+	f.Write(buf)
 }
 
-func (l *linux) syn() { l.emit(evSyn, 0, 0) }
+func (l *linux) syn(f *os.File) { l.emit(f, evSyn, 0, 0) }
 
 func (l *linux) Handle(e proto.InputEvent) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	switch e.T {
 	case "mm":
-		l.x, l.y = e.X, e.Y
-		l.emit(evAbs, absX, int32(e.X*absRange))
-		l.emit(evAbs, absY, int32(e.Y*absRange))
-		l.syn()
+		l.emit(l.tab, evAbs, absX, int32(e.X*absRange))
+		l.emit(l.tab, evAbs, absY, int32(e.Y*absRange))
+		l.syn(l.tab)
 	case "mr":
-		l.emit(evRel, relX, int32(e.DX))
-		l.emit(evRel, relY, int32(e.DY))
-		l.syn()
+		l.emit(l.kbd, evRel, relX, int32(e.DX))
+		l.emit(l.kbd, evRel, relY, int32(e.DY))
+		l.syn(l.kbd)
 	case "md", "mu":
 		var code uint16
 		switch e.B {
@@ -168,17 +185,17 @@ func (l *linux) Handle(e proto.InputEvent) {
 		}
 		down := e.T == "md"
 		l.buttons[e.B] = down
-		l.emit(evKey, code, boolInt32(down))
-		l.syn()
+		l.emit(l.tab, evKey, code, boolInt32(down))
+		l.syn(l.tab)
 	case "wh":
 		// browsers send pixels; one wheel notch is about 100px
 		if n := int32(-e.DY / 50); n != 0 {
-			l.emit(evRel, relWheel, n)
+			l.emit(l.kbd, evRel, relWheel, n)
 		}
 		if n := int32(e.DX / 50); n != 0 {
-			l.emit(evRel, relHWheel, n)
+			l.emit(l.kbd, evRel, relHWheel, n)
 		}
-		l.syn()
+		l.syn(l.kbd)
 	case "kd", "ku":
 		kc, ok := linuxKeyCodes[e.Code]
 		if !ok {
@@ -191,8 +208,8 @@ func (l *linux) Handle(e proto.InputEvent) {
 		} else {
 			delete(l.heldKeys, kc)
 		}
-		l.emit(evKey, kc, boolInt32(down))
-		l.syn()
+		l.emit(l.kbd, evKey, kc, boolInt32(down))
+		l.syn(l.kbd)
 	}
 }
 
@@ -200,16 +217,17 @@ func (l *linux) ReleaseAll() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	for kc := range l.heldKeys {
-		l.emit(evKey, kc, 0)
+		l.emit(l.kbd, evKey, kc, 0)
 	}
 	l.heldKeys = map[uint16]bool{}
+	l.syn(l.kbd)
 	for i, code := range []uint16{btnLeft, btnMiddle, btnRight} {
 		if l.buttons[i] {
-			l.emit(evKey, code, 0)
+			l.emit(l.tab, evKey, code, 0)
 			l.buttons[i] = false
 		}
 	}
-	l.syn()
+	l.syn(l.tab)
 }
 
 func boolInt32(b bool) int32 {
