@@ -13,4 +13,4 @@ After it runs, the box is both the rendezvous (public IP) and a "network compute
 host called `cloudbox`. Point `nc-host` on a machine behind NAT at the same rendezvous
 to test the NAT path, and point the browser or the iPhone app at `http://<ip>:8765`.
 
-Tear down: `doctl compute droplet delete <name>`.
+Day to day: `droplet.sh status | ssh | creds | logs | update | off | on | destroy`. Powered-off droplets are still billed; destroy when not in use and recreate in about five minutes.

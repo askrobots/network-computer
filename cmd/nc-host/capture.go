@@ -67,9 +67,12 @@ func ffmpegArgs(o captureOpts) []string {
 
 	args := []string{"-hide_banner", "-loglevel", "warning", "-fflags", "nobuffer", "-flags", "low_delay"}
 	args = append(args, in...)
-	// passthrough: never duplicate or drop frames to hit a nominal rate; the
-	// capture device sets the pace and the RTP clock follows real timestamps.
-	args = append(args, "-fps_mode", "passthrough")
+	// avfoundation reports a bogus nominal rate and ffmpeg would duplicate frames
+	// to match it; passthrough lets the capture device set the pace. x11grab and
+	// gdigrab timestamp correctly and warn about passthrough, so darwin only.
+	if runtime.GOOS == "darwin" {
+		args = append(args, "-fps_mode", "passthrough")
+	}
 	if o.Width > 0 && o.Height > 0 {
 		args = append(args, "-vf", fmt.Sprintf("scale=%d:%d", o.Width, o.Height))
 	}
