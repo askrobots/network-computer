@@ -50,7 +50,7 @@ Three programs, all in Go:
 ## Quick start (everything on one machine)
 
 ```sh
-git clone https://github.com/dbbasic/network-computer
+git clone https://github.com/askrobots/network-computer
 cd network-computer
 go build -o bin/ ./cmd/...
 
@@ -138,5 +138,4 @@ docs/                plan, spike results
 
 ## License
 
-To be chosen before the first public release. No dependency is copyleft, so MIT,
-Apache 2.0 and GPL are all open.
+MIT. See [LICENSE](LICENSE).

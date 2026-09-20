@@ -26,7 +26,7 @@ import (
 	"github.com/pion/turn/v4"
 	"golang.org/x/crypto/acme/autocert"
 
-	"github.com/dbbasic/network-computer/internal/proto"
+	"github.com/askrobots/network-computer/internal/proto"
 )
 
 //go:embed web

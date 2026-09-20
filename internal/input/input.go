@@ -4,7 +4,7 @@ package input
 import (
 	"log"
 
-	"github.com/dbbasic/network-computer/internal/proto"
+	"github.com/askrobots/network-computer/internal/proto"
 )
 
 // Injector turns InputEvents into OS events.

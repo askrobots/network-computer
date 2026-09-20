@@ -1,4 +1,4 @@
-module github.com/dbbasic/network-computer
+module github.com/askrobots/network-computer
 
 go 1.27
 

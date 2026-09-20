@@ -23,8 +23,8 @@ import (
 	"github.com/pion/webrtc/v4"
 	"github.com/pion/webrtc/v4/pkg/media"
 
-	"github.com/dbbasic/network-computer/internal/input"
-	"github.com/dbbasic/network-computer/internal/proto"
+	"github.com/askrobots/network-computer/internal/input"
+	"github.com/askrobots/network-computer/internal/proto"
 )
 
 type host struct {

@@ -20,7 +20,7 @@ import (
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
 
-	"github.com/dbbasic/network-computer/internal/proto"
+	"github.com/askrobots/network-computer/internal/proto"
 )
 
 func main() {

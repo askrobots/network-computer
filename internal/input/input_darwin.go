@@ -43,7 +43,7 @@ import (
 	"log"
 	"sync"
 
-	"github.com/dbbasic/network-computer/internal/proto"
+	"github.com/askrobots/network-computer/internal/proto"
 )
 
 const (
