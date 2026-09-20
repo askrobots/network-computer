@@ -90,9 +90,14 @@ func (m *mac) Handle(e proto.InputEvent) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	switch e.T {
-	case "mm":
-		m.x = m.ox + e.X*m.w
-		m.y = m.oy + e.Y*m.h
+	case "mm", "mr":
+		if e.T == "mm" {
+			m.x = m.ox + e.X*m.w
+			m.y = m.oy + e.Y*m.h
+		} else {
+			m.x = min(max(m.x+e.DX, m.ox), m.ox+m.w-1)
+			m.y = min(max(m.y+e.DY, m.oy), m.oy+m.h-1)
+		}
 		typ := evMouseMove
 		switch {
 		case m.buttons[0]:
