@@ -197,3 +197,12 @@ which matters as soon as the phone both hears the desktop and sends its mic.
 3. Files and clipboard.
 4. Phone camera to desktop on Linux, then the macOS Camera Extension.
 5. Windows audio; Windows mic and camera last.
+
+## Client feel (added 2026-09-20 after the first real use)
+- **Local cursor echo.** Draw the pointer locally the instant the mouse moves, and have
+  the host stop drawing the remote cursor into the video (`-capture_cursor 0`,
+  `-draw_mouse 0`). Send the cursor shape and hotspot over the control channel when it
+  changes, so the local pointer looks right. This is the standard remote-desktop trick and
+  removes the round trip plus encode and decode latency from every mouse movement.
+- **Stats overlay** should be collapsible or moved to a corner; it sits over the desktop.
+  The user asked for it to stay as is until Firefox and audio testing are finished.
