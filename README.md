@@ -45,7 +45,7 @@ Three programs, all in Go:
 - `ffmpeg` on the host machine (`brew install ffmpeg`, `apt install ffmpeg`).
 - On macOS, the terminal running `nc-host` needs Accessibility permission to inject
   input (System Settings, Privacy & Security, Accessibility). Use `-dry-run` to skip that.
-- On Linux the host currently needs X11 (or XWayland); input injection is not written yet.
+- On Linux the host needs X11 (or XWayland) for capture, and write access to `/dev/uinput` for input (root, or a udev rule for the `input` group).
 
 ## Quick start (everything on one machine)
 
@@ -121,7 +121,7 @@ credentials and key-based pairing are on the plan.
 
 - One ffmpeg per session; a second client on a macOS host will fail. Shared capture is next.
 - No keyframe on demand; packet loss can show artifacts for up to 2 seconds.
-- Linux and Windows input injection are stubs. macOS works.
+- Windows input injection is a stub. macOS (CGEvent) and Linux (uinput) work.
 - Audio is opt-in and system audio on macOS needs a loopback device.
 - No native iOS app yet. Safari on an iPhone can open the browser client.
 
