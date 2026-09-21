@@ -12,6 +12,10 @@ browser or a headless probe, through NAT via a self-hosted rendezvous with STUN 
 relay. The native iOS app does not exist yet. See [docs/PLAN.md](docs/PLAN.md) for the
 design and [docs/SPIKE.md](docs/SPIKE.md) for measurements.
 
+![A Linux desktop streamed to a browser over WebRTC](docs/media/desktop.png)
+
+*A cloud Linux desktop streamed to a Mac browser through NAT, browsing this very repo. 1280×720, direct path, ~45 ms, with audio.*
+
 ## How it works
 
 ```
