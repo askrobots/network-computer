@@ -74,29 +74,45 @@ type uinputAbsSetup struct {
 // Two devices, because libinput treats anything with relative axes as a mouse
 // and ignores its absolute events. "kbd" is a keyboard plus relative mouse and
 // wheel; "tab" is an absolute pointer shaped like the QEMU USB tablet.
+// Three devices, because libinput classifies a device by its axes: a device
+// with relative axes is a mouse and its key events are ignored, and a device
+// with both relative and absolute axes ignores the absolute ones. So the
+// keyboard, the relative mouse and the absolute tablet must be separate.
 type linux struct {
-	mu       sync.Mutex
-	kbd, tab *os.File
-	heldKeys map[uint16]bool
-	buttons  [3]bool
+	mu              sync.Mutex
+	kbd, mouse, tab *os.File
+	heldKeys        map[uint16]bool
+	buttons         [3]bool
 }
 
+const (
+	kindKeyboard = iota
+	kindMouse
+	kindTablet
+)
+
 func newPlatform(display int) (Injector, error) {
-	kbd, err := createDevice("network-computer keyboard+mouse", false)
+	kbd, err := createDevice("network-computer keyboard", kindKeyboard)
 	if err != nil {
 		return nil, err
 	}
-	tab, err := createDevice("network-computer tablet", true)
+	mouse, err := createDevice("network-computer mouse", kindMouse)
 	if err != nil {
 		kbd.Close()
 		return nil, err
 	}
+	tab, err := createDevice("network-computer tablet", kindTablet)
+	if err != nil {
+		kbd.Close()
+		mouse.Close()
+		return nil, err
+	}
 	time.Sleep(300 * time.Millisecond) // let the display server pick the devices up
-	log.Printf("input: uinput devices created")
-	return &linux{kbd: kbd, tab: tab, heldKeys: map[uint16]bool{}}, nil
+	log.Printf("input: uinput devices created (keyboard, mouse, tablet)")
+	return &linux{kbd: kbd, mouse: mouse, tab: tab, heldKeys: map[uint16]bool{}}, nil
 }
 
-func createDevice(name string, absolute bool) (*os.File, error) {
+func createDevice(name string, kind int) (*os.File, error) {
 	f, err := os.OpenFile("/dev/uinput", os.O_WRONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, fmt.Errorf("open /dev/uinput: %w (run as root or add a udev rule)", err)
@@ -114,23 +130,29 @@ func createDevice(name string, absolute bool) (*os.File, error) {
 	}
 	must(ioctl(uiSetEvBit, evKey))
 	must(ioctl(uiSetEvBit, evSyn))
-	for _, b := range []uintptr{btnLeft, btnRight, btnMiddle} {
-		must(ioctl(uiSetKeyBit, b))
-	}
-	if absolute {
+	switch kind {
+	case kindKeyboard:
+		// keyboard keys only, no buttons and no axes, so libinput makes a keyboard
+		for k := uintptr(1); k < 256; k++ {
+			must(ioctl(uiSetKeyBit, k))
+		}
+	case kindMouse:
+		must(ioctl(uiSetEvBit, evRel))
+		for _, b := range []uintptr{btnLeft, btnRight, btnMiddle} {
+			must(ioctl(uiSetKeyBit, b))
+		}
+		for _, r := range []uintptr{relX, relY, relWheel, relHWheel} {
+			must(ioctl(uiSetRelBit, r))
+		}
+	case kindTablet:
 		must(ioctl(uiSetEvBit, evAbs))
+		for _, b := range []uintptr{btnLeft, btnRight, btnMiddle} {
+			must(ioctl(uiSetKeyBit, b))
+		}
 		for _, a := range []uint16{absX, absY} {
 			must(ioctl(uiSetAbsBit, uintptr(a)))
 			as := uinputAbsSetup{Code: a, Minimum: 0, Maximum: absRange}
 			must(ioctl(uiAbsSetup, uintptr(unsafe.Pointer(&as))))
-		}
-	} else {
-		must(ioctl(uiSetEvBit, evRel))
-		for k := uintptr(1); k < 256; k++ { // all ordinary keyboard keycodes
-			must(ioctl(uiSetKeyBit, k))
-		}
-		for _, r := range []uintptr{relX, relY, relWheel, relHWheel} {
-			must(ioctl(uiSetRelBit, r))
 		}
 	}
 	us := uinputSetup{Bustype: 0x03, Vendor: 0x1d6b, Product: 0x0104, Version: 1}
@@ -168,9 +190,9 @@ func (l *linux) Handle(e proto.InputEvent) {
 		l.emit(l.tab, evAbs, absY, int32(e.Y*absRange))
 		l.syn(l.tab)
 	case "mr":
-		l.emit(l.kbd, evRel, relX, int32(e.DX))
-		l.emit(l.kbd, evRel, relY, int32(e.DY))
-		l.syn(l.kbd)
+		l.emit(l.mouse, evRel, relX, int32(e.DX))
+		l.emit(l.mouse, evRel, relY, int32(e.DY))
+		l.syn(l.mouse)
 	case "md", "mu":
 		var code uint16
 		switch e.B {
@@ -190,12 +212,12 @@ func (l *linux) Handle(e proto.InputEvent) {
 	case "wh":
 		// browsers send pixels; one wheel notch is about 100px
 		if n := int32(-e.DY / 50); n != 0 {
-			l.emit(l.kbd, evRel, relWheel, n)
+			l.emit(l.mouse, evRel, relWheel, n)
 		}
 		if n := int32(e.DX / 50); n != 0 {
-			l.emit(l.kbd, evRel, relHWheel, n)
+			l.emit(l.mouse, evRel, relHWheel, n)
 		}
-		l.syn(l.kbd)
+		l.syn(l.mouse)
 	case "kd", "ku":
 		kc, ok := linuxKeyCodes[e.Code]
 		if !ok {
