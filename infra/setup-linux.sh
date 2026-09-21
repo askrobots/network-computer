@@ -18,6 +18,9 @@ echo "deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.asc] https://package
 printf "Package: *\nPin: origin packages.mozilla.org\nPin-Priority: 1000\n" > /etc/apt/preferences.d/mozilla
 apt-get update -q && apt-get install -y -q firefox
 
+# match Opus: 48 kHz everywhere avoids a resample step that muddies audio
+printf "default-sample-rate = 48000\nalternate-sample-rate = 48000\n" >> /etc/pulse/daemon.conf
+
 # audio: pulseaudio as a service with a virtual sink; every client finds it via client.conf
 printf "default-server = unix:/run/nc-pulse/native\nautospawn = no\n" > /etc/pulse/client.conf
 rm -f /etc/pulse/client.conf.d/01-enable-autospawn.conf
@@ -29,7 +32,7 @@ Environment=HOME=/root
 RuntimeDirectory=nc-pulse
 RuntimeDirectoryMode=0755
 ExecStart=/usr/bin/pulseaudio --daemonize=no --exit-idle-time=-1 --disallow-exit --load="module-native-protocol-unix auth-anonymous=1 socket=/run/nc-pulse/native"
-ExecStartPost=/bin/sh -c "sleep 2; pactl load-module module-null-sink sink_name=nc sink_properties=device.description=network-computer; pactl set-default-sink nc"
+ExecStartPost=/bin/sh -c "sleep 2; pactl load-module module-null-sink sink_name=nc rate=48000 channels=2 sink_properties=device.description=network-computer; pactl set-default-sink nc"
 Restart=always
 [Install]
 WantedBy=multi-user.target
