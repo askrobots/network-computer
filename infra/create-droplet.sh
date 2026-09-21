@@ -22,9 +22,4 @@ done
 echo "droplet $NAME at $IP; waiting for ssh..."
 for i in $(seq 1 30); do ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 root@"$IP" true 2>/dev/null && break; sleep 5; done
 
-echo "copying provision/ and running apply.sh..."
-ssh root@"$IP" 'mkdir -p /root/provision'
-scp -q -r "$ROOT/provision/." root@"$IP":/root/provision/
-ssh root@"$IP" "NC_PUBLIC_IP=$IP sh /root/provision/apply.sh"
-echo
-echo "done. rendezvous: http://$IP:8765   secrets: ssh root@$IP cat /etc/nc/env"
+sh "$(dirname "$0")/provision-host.sh" "$IP" "$NAME"

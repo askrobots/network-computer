@@ -74,6 +74,11 @@ NC_PASSWORD=change-me NC_PIN=<pin> ./bin/nc-probe -rendezvous http://127.0.0.1:8
 
 ## Across the internet
 
+Put `nc-rendezvous` (and, for a cloud desktop, `nc-host`) on any machine with a
+public IP. `infra/` scripts this for DigitalOcean (tested), Vultr, Linode and AWS,
+or provision any Ubuntu box you already have with `infra/provision-host.sh <ip>`.
+See [infra/README.md](infra/README.md). The rest of this section is the manual path.
+
 Put `nc-rendezvous` on any machine with a public IP. Open TCP 8765 (or 443 with TLS) and
 UDP 3478, plus UDP 49152 to 65535 for relayed sessions.
 
