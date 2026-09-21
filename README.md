@@ -129,6 +129,12 @@ credentials and key-based pairing are on the plan.
 - Audio is opt-in and system audio on macOS needs a loopback device.
 - No native iOS app yet. Safari on an iPhone can open the browser client.
 
+## Running it as an agent
+
+A host is a real machine running `nc-host`, so an assistant with shell or input
+access can operate it: run commands, install software, and drive the GUI while
+reading the screen back. See [docs/AGENT.md](docs/AGENT.md).
+
 ## Layout
 
 ```
