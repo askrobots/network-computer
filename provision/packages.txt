@@ -1,0 +1,21 @@
+# One apt package per line. Comments and blank lines ignored.
+# Capture, encode, audio
+ffmpeg
+pulseaudio
+pulseaudio-utils
+# Headless desktop
+xserver-xorg-core
+xserver-xorg-video-dummy
+xserver-xorg-input-evdev
+xfce4
+xfce4-terminal
+xterm
+dbus-x11
+# GUI apps + polish
+mousepad
+xdotool
+xdg-utils
+# Tooling
+git
+curl
+ufw

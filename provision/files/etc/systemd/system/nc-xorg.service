@@ -1,0 +1,7 @@
+[Unit]
+Description=headless Xorg for network-computer
+[Service]
+ExecStart=/usr/bin/Xorg :0 -config /etc/X11/xorg.conf.d/10-dummy.conf -noreset -nolisten tcp
+Restart=always
+[Install]
+WantedBy=multi-user.target

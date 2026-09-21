@@ -6,6 +6,7 @@
 #   infra/droplet.sh creds           rendezvous url, password, host PIN
 #   infra/droplet.sh logs            follow nc-host and nc-rendezvous logs
 #   infra/droplet.sh update          git pull + rebuild + restart services on the box
+#   infra/droplet.sh provision       re-copy provision/ files and re-run apply.sh
 #   infra/droplet.sh off | on        power off (still billed) / power on
 #   infra/droplet.sh destroy         delete it (stops billing); recreate takes ~5 min
 set -e
@@ -24,6 +25,7 @@ case "$1" in
   creds)  IP=$(ip); echo "rendezvous: http://$IP:8765"; ssh root@"$IP" cat /etc/nc/env ;;
   logs)   ssh root@"$(ip)" journalctl -f -u nc-host -u nc-rendezvous ;;
   update) ssh root@"$(ip)" 'cd /opt/network-computer && git pull -q && export PATH=$PATH:/usr/local/go/bin && go build -o /usr/local/bin/ ./cmd/... && systemctl restart nc-rendezvous nc-host && echo updated' ;;
+  provision) IP=$(ip); ROOT=$(cd "$(dirname "$0")/.." && pwd); ssh root@"$IP" 'mkdir -p /root/provision'; scp -q -r "$ROOT/provision/." root@"$IP":/root/provision/; ssh root@"$IP" "NC_PUBLIC_IP=$IP sh /root/provision/apply.sh" ;;
   off)    doctl compute droplet-action power-off "$(id)" --wait >/dev/null && echo "$NAME powered off (still billed; destroy to stop billing)" ;;
   on)     doctl compute droplet-action power-on "$(id)" --wait >/dev/null && echo "$NAME powered on at $(ip)" ;;
   destroy) doctl compute droplet delete "$(id)" --force && echo "$NAME destroyed" ;;

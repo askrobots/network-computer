@@ -1,0 +1,12 @@
+[Unit]
+Description=network-computer host (headless desktop)
+After=nc-desktop.service nc-rendezvous.service nc-audio.service
+Requires=nc-desktop.service
+[Service]
+EnvironmentFile=/etc/nc/env
+Environment=DISPLAY=:0
+ExecStartPre=/bin/sleep 3
+ExecStart=/usr/local/bin/nc-host -rendezvous http://127.0.0.1:8765 -name cloudbox -size 1280x720 -fps 30 -bitrate 4M -encoder libx264 -audio-device nc.monitor
+Restart=always
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,8 @@
+# Polished defaults for the streamed desktop. Declarative, applies to every user.
+[org/xfce/mousepad/preferences/view]
+word-wrap=true
+show-line-numbers=true
+highlight-current-line=true
+
+[org/xfce/mousepad/preferences/window]
+statusbar-visible=true

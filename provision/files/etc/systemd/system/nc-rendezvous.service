@@ -1,0 +1,9 @@
+[Unit]
+Description=network-computer rendezvous
+After=network-online.target
+[Service]
+EnvironmentFile=/etc/nc/env
+ExecStart=/usr/local/bin/nc-rendezvous -http :8765 -turn :3478 -public-ip ${NC_PUBLIC_IP}
+Restart=always
+[Install]
+WantedBy=multi-user.target
