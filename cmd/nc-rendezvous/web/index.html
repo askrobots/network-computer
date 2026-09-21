@@ -84,6 +84,17 @@
   #stats b{color:var(--text);font-weight:600}
   #stats .k{display:inline-block;width:64px;color:var(--dim)}
 
+  /* graphs panel */
+  #graphs{position:absolute;top:calc(56px + env(safe-area-inset-top,0px));right:12px;z-index:15;
+    width:280px;background:#12151acc;border:1px solid var(--line);border-radius:10px;padding:10px 12px;
+    backdrop-filter:blur(8px);display:none}
+  #graphs.on{display:block}
+  .g{margin-bottom:9px}
+  .g:last-child{margin-bottom:0}
+  .g-head{display:flex;justify-content:space-between;font:11px ui-monospace,Menlo,monospace;color:var(--dim);margin-bottom:2px}
+  .g-head b{color:var(--text);font-weight:600}
+  .g canvas{width:100%;height:34px;display:block;border-radius:4px;background:#0c0f13}
+
   /* keyboard bar */
   #keys{position:absolute;left:0;right:0;bottom:0;z-index:20;display:none;gap:6px;padding:10px;
     padding-bottom:calc(10px + env(safe-area-inset-bottom,0px));overflow-x:auto;
@@ -151,6 +162,7 @@
     <span class="pill host"><span class="dot" id="dot"></span><span id="p-host">—</span></span>
     <span class="pill" id="p-net">connecting…</span>
     <span class="spacer"></span>
+    <button class="bar-btn" id="b-graphs" title="Graphs">📈</button>
     <button class="bar-btn" id="b-stats" title="Stats">📊</button>
     <button class="bar-btn" id="b-keys" title="Keyboard">⌨️</button>
     <button class="bar-btn" id="b-full" title="Fullscreen">⛶</button>
@@ -158,6 +170,13 @@
   </div>
 
   <div id="stats"></div>
+  <div id="graphs">
+    <div class="g"><div class="g-head"><span>frame rate</span><b id="gv-fps">0 fps</b></div><canvas id="gc-fps"></canvas></div>
+    <div class="g"><div class="g-head"><span>bitrate</span><b id="gv-mbps">0 Mb/s</b></div><canvas id="gc-mbps"></canvas></div>
+    <div class="g"><div class="g-head"><span>packet loss</span><b id="gv-loss">0 /s</b></div><canvas id="gc-loss"></canvas></div>
+    <div class="g"><div class="g-head"><span>round trip</span><b id="gv-rtt">0 ms</b></div><canvas id="gc-rtt"></canvas></div>
+    <div class="g"><div class="g-head"><span>jitter</span><b id="gv-jit">0 ms</b></div><canvas id="gc-jit"></canvas></div>
+  </div>
 
   <div id="keys">
     <button class="key" data-code="Escape">esc</button>
@@ -362,6 +381,38 @@ function startWatchdog(){
 /* ---------- stats ---------- */
 $('#b-stats').onclick=()=>{$('#stats').classList.toggle('on');store.set('stats',$('#stats').classList.contains('on')?'1':'0');};
 if(store.get('stats','0')==='1') $('#stats').classList.add('on');
+$('#b-graphs').onclick=()=>{const on=$('#graphs').classList.toggle('on');$('#b-graphs').classList.toggle('active',on);store.set('graphs',on?'1':'0');};
+if(store.get('graphs','0')==='1'){$('#graphs').classList.add('on');$('#b-graphs').classList.add('active');}
+
+// rolling time-series for the graphs
+const SERIES={fps:[],mbps:[],loss:[],rtt:[],jit:[]}, SPAN=60;
+let prevLoss=0;
+function push(name,v){const a=SERIES[name];a.push(v);if(a.length>SPAN)a.shift();}
+function drawSpark(id,data,color,warnAt){
+  const c=document.getElementById(id); if(!c) return;
+  const w=c.clientWidth||256,h=c.clientHeight||34,dpr=devicePixelRatio||1;
+  if(c.width!==w*dpr){c.width=w*dpr;c.height=h*dpr;}
+  const g=c.getContext('2d'); g.setTransform(dpr,0,0,dpr,0,0); g.clearRect(0,0,w,h);
+  if(!data.length) return;
+  const max=Math.max(warnAt||0,...data,1e-6), n=data.length;
+  const x=i=>i/(SPAN-1)*w, y=v=>h-2-(v/max)*(h-4);
+  // area
+  g.beginPath(); g.moveTo(x(SPAN-n),h);
+  data.forEach((v,i)=>g.lineTo(x(SPAN-n+i),y(v)));
+  g.lineTo(x(SPAN-1),h); g.closePath();
+  g.fillStyle=color+'22'; g.fill();
+  // line
+  g.beginPath();
+  data.forEach((v,i)=>{const xx=x(SPAN-n+i),yy=y(v);i?g.lineTo(xx,yy):g.moveTo(xx,yy);});
+  g.strokeStyle=color; g.lineWidth=1.5; g.stroke();
+}
+function drawGraphs(){
+  drawSpark('gc-fps',SERIES.fps,'#4c8dff');
+  drawSpark('gc-mbps',SERIES.mbps,'#3ad29f');
+  drawSpark('gc-loss',SERIES.loss,'#ff5d5d',1);
+  drawSpark('gc-rtt',SERIES.rtt,'#ffb454');
+  drawSpark('gc-jit',SERIES.jit,'#b98bff');
+}
 let prev={b:0,f:0,t:0};
 function startStats(){
   statsTimer=setInterval(async()=>{
@@ -391,6 +442,18 @@ function startStats(){
         `<div><span class="k">rate</span><b>${fps.toFixed(0)} fps</b> · ${mbps.toFixed(1)} Mb/s · ${codec}</b></div>`+
         `<div><span class="k">latency</span><b>${net}</b></div>`+
         `<div><span class="k">decode</span>${dec} ms · lost ${inb.packetsLost}</div>`;
+
+      // graphs
+      const lossNow=Math.max(0,(inb.packetsLost||0)-prevLoss); prevLoss=inb.packetsLost||0;
+      const rttMs=pair?(pair.currentRoundTripTime||0)*1000:0;
+      const jit=(inb.jitter||0)*1000;
+      push('fps',fps); push('mbps',mbps); push('loss',lossNow); push('rtt',rttMs); push('jit',jit);
+      $('#gv-fps').textContent=fps.toFixed(0)+' fps';
+      $('#gv-mbps').textContent=mbps.toFixed(1)+' Mb/s';
+      $('#gv-loss').textContent=lossNow+' /s';
+      $('#gv-rtt').textContent=rttMs.toFixed(0)+' ms';
+      $('#gv-jit').textContent=jit.toFixed(1)+' ms';
+      if($('#graphs').classList.contains('on')) drawGraphs();
     }
   },1000);
 }

@@ -31,7 +31,8 @@ func audioArgs(device string) []string {
 	}
 	args := []string{"-hide_banner", "-loglevel", "warning", "-fflags", "nobuffer"}
 	args = append(args, in...)
-	return append(args, "-c:a", "libopus", "-b:a", "128k", "-application", "lowdelay", "-ar", "48000",
+	return append(args, "-c:a", "libopus", "-b:a", "128k", "-ar", "48000",
+		"-application", "audio", "-fec", "1", "-packet_loss", "10",
 		"-frame_duration", "20", "-page_duration", "20000", "-f", "opus", "pipe:1")
 }
 
