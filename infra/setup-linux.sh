@@ -88,6 +88,14 @@ EOT
 
 # uinput access for the service (it runs as root here anyway)
 echo 'KERNEL=="uinput", MODE="0660", GROUP="input"' > /etc/udev/rules.d/99-nc-uinput.rules
+# This droplet has no IPv6 route; sites that return AAAA records (YouTube, etc.)
+# would otherwise stall in the browser before falling back to IPv4. Turn IPv6 off.
+cat > /etc/sysctl.d/99-nc-noipv6.conf <<'EOT'
+net.ipv6.conf.all.disable_ipv6 = 1
+net.ipv6.conf.default.disable_ipv6 = 1
+EOT
+sysctl -p /etc/sysctl.d/99-nc-noipv6.conf >/dev/null 2>&1 || true
+
 modprobe uinput || true
 echo uinput > /etc/modules-load.d/uinput.conf
 
