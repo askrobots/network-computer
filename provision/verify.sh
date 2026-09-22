@@ -48,8 +48,10 @@ check "firewall allows 8765/tcp"         sh -c 'ufw status | grep -q "8765/tcp"'
 check "firewall allows 3478/udp"         sh -c 'ufw status | grep -q "3478/udp"'
 
 echo "network computer"
-. /etc/nc/env 2>/dev/null
-check "host registered with rendezvous"  sh -c "curl -s -u nc:\$NC_PASSWORD http://127.0.0.1:8765/hosts | grep -q '\"'"
+set -a; . /etc/nc/env 2>/dev/null; set +a   # export, so the checks below see them
+check "rendezvous accepts the password"  sh -c 'curl -sf -o /dev/null -u "nc:$NC_PASSWORD" http://127.0.0.1:8765/hosts'
+check "host name recorded in /etc/nc/env" test -n "$NC_HOST_NAME"
+check "host registered as '$NC_HOST_NAME'" sh -c 'curl -sf -u "nc:$NC_PASSWORD" http://127.0.0.1:8765/hosts | grep -q "\"$NC_HOST_NAME\""'
 echo
 echo "$PASS ok, $FAIL failed"
 [ "$FAIL" -eq 0 ]

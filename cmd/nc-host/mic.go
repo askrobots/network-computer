@@ -63,17 +63,26 @@ func playMic(ctx context.Context, track *webrtc.TrackRemote, device string) {
 		drain(track)
 		return
 	}
-	packets := 0
+	packets, bad := 0, 0
 	for {
 		pkt, _, err := track.ReadRTP()
 		if err != nil {
 			break
 		}
+		if len(pkt.Payload) == 0 {
+			continue // padding / keepalive
+		}
 		if err := ogg.WriteRTP(pkt); err != nil {
+			if strings.Contains(err.Error(), "invalid Opus packet") {
+				if bad++; bad == 1 || bad%500 == 0 {
+					log.Printf("mic: skipped %d malformed packet(s)", bad)
+				}
+				continue
+			}
 			if err != io.ErrClosedPipe {
 				log.Printf("mic write: %v", err)
 			}
-			break
+			break // ffmpeg is gone
 		}
 		if packets++; packets == 1 {
 			log.Printf("mic: first audio packet from client")

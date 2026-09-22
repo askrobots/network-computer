@@ -11,6 +11,12 @@ cd "$(dirname "$0")"
 export DEBIAN_FRONTEND=noninteractive
 GO_VERSION=1.27.1
 NC_PUBLIC_IP=${NC_PUBLIC_IP:-$(curl -s -4 ifconfig.me)}
+# Host name: explicit NC_HOST_NAME, else what this box already recorded, else a
+# default. Recording it means a later re-provision can never rename the host
+# (which would strand clients and invalidate their pairing tokens).
+if [ -z "$NC_HOST_NAME" ] && [ -f /etc/nc/env ]; then
+  NC_HOST_NAME=$(sed -n 's/^NC_HOST_NAME=//p' /etc/nc/env)
+fi
 NC_HOST_NAME=${NC_HOST_NAME:-cloudbox}
 
 # What each service depends on. apply.sh restarts a running service only when
@@ -72,13 +78,17 @@ if [ ! -f /etc/nc/env ]; then
 NC_PASSWORD=$(head -c 12 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 16)
 NC_PIN=$(shuf -i 100000-999999 -n 1)
 NC_PUBLIC_IP=${NC_PUBLIC_IP}
+NC_HOST_NAME=${NC_HOST_NAME}
 EOT
   chmod 600 /etc/nc/env
 else
   sed -i "s/^NC_PUBLIC_IP=.*/NC_PUBLIC_IP=${NC_PUBLIC_IP}/" /etc/nc/env
+  if grep -q '^NC_HOST_NAME=' /etc/nc/env; then
+    sed -i "s/^NC_HOST_NAME=.*/NC_HOST_NAME=${NC_HOST_NAME}/" /etc/nc/env
+  else
+    echo "NC_HOST_NAME=${NC_HOST_NAME}" >> /etc/nc/env
+  fi
 fi
-# host name is baked into the unit; swap it if NC_HOST_NAME differs
-sed -i "s/-name cloudbox/-name ${NC_HOST_NAME}/" /etc/systemd/system/nc-host.service
 
 echo ">> firewall"
 ufw allow 22/tcp >/dev/null; ufw allow 8765/tcp >/dev/null

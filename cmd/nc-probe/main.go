@@ -5,6 +5,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -320,6 +321,9 @@ func sendTone(ctx context.Context, track *webrtc.TrackLocalStaticSample, hz int)
 		page, hdr, err := ogg.ParseNextPage()
 		if err != nil {
 			return
+		}
+		if bytes.HasPrefix(page, []byte("OpusTags")) {
+			continue // metadata page, not audio
 		}
 		d := time.Duration(hdr.GranulePosition-last) * time.Second / 48000
 		last = hdr.GranulePosition

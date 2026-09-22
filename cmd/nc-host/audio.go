@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"log"
 	"os"
@@ -60,6 +61,9 @@ func streamAudio(ctx context.Context, device string, track sampleWriter) {
 				page, hdr, err := ogg.ParseNextPage()
 				if err != nil {
 					break
+				}
+				if bytes.HasPrefix(page, []byte("OpusTags")) {
+					continue // metadata page, not audio
 				}
 				samples := hdr.GranulePosition - lastGranule
 				lastGranule = hdr.GranulePosition
