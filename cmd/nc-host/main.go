@@ -37,6 +37,7 @@ type host struct {
 	api                 *webrtc.API
 	user, password, pin string
 	httpc               *http.Client // pinned when -tls-fingerprint is set
+	pairs               *pairing
 
 	mu       sync.Mutex
 	ws       *websocket.Conn
@@ -62,6 +63,8 @@ func main() {
 	user := flag.String("user", envOr("NC_USER", "nc"), "rendezvous basic auth username (env NC_USER)")
 	password := flag.String("password", os.Getenv("NC_PASSWORD"), "rendezvous basic auth password (env NC_PASSWORD)")
 	pin := flag.String("pin", os.Getenv("NC_PIN"), "PIN a client must present to connect to this host (env NC_PIN); generated and printed if empty")
+	stateDir := flag.String("state-dir", defaultHostStateDir(), "where the pairing secret is kept")
+	resetPairs := flag.Bool("reset-pairings", false, "rotate the pairing secret, revoking every paired client")
 	tlsFP := flag.String("tls-fingerprint", os.Getenv("NC_TLS_FP"), "pin the rendezvous certificate by SHA-256 (env NC_TLS_FP); for a self-signed rendezvous")
 	dryRun := flag.Bool("dry-run", false, "log input events instead of injecting them")
 	flag.Parse()
@@ -72,6 +75,14 @@ func main() {
 	log.Printf("host PIN: %s   (clients must enter this to connect)", *pin)
 	h := &host{name: *name, audio: *audio, dryRun: *dryRun, sessions: map[string]*session{}, user: *user, password: *password, pin: *pin}
 	h.httpc = tlspin.Client(*tlsFP)
+	pairs, err := loadPairing(*name, *stateDir, *resetPairs)
+	if err != nil {
+		log.Fatalf("pairing secret: %v", err)
+	}
+	h.pairs = pairs
+	if *resetPairs {
+		log.Printf("pairing secret rotated: every previously paired client must enter the PIN again")
+	}
 	h.capture = captureOpts{Display: *display, FPS: *fps, Bitrate: *bitrate, Encoder: *encoder, Extra: *extra, Custom: *custom}
 	if *size != "" && *size != "native" {
 		fmt.Sscanf(*size, "%dx%d", &h.capture.Width, &h.capture.Height)
@@ -173,12 +184,22 @@ func (h *host) send(ctx context.Context, m proto.Message) error {
 
 func (h *host) handleOffer(ctx context.Context, m proto.Message) {
 	peer := m.From
-	if subtle.ConstantTimeCompare([]byte(m.PIN), []byte(h.pin)) != 1 {
-		log.Printf("[%s] offer rejected: wrong PIN", peer)
-		h.send(ctx, proto.Message{Type: "error", To: peer, Error: "wrong PIN"})
+	pinOK := m.PIN != "" && subtle.ConstantTimeCompare([]byte(m.PIN), []byte(h.pin)) == 1
+	pairOK := m.Pair != "" && h.pairs.valid(m.Pair)
+	if !pinOK && !pairOK {
+		why := "wrong PIN"
+		if m.Pair != "" && m.PIN == "" {
+			why = "pairing expired or revoked: enter the PIN"
+		}
+		log.Printf("[%s] offer rejected: %s", peer, why)
+		h.send(ctx, proto.Message{Type: "error", To: peer, Error: why})
 		return
 	}
-	log.Printf("[%s] offer received, PIN ok", peer)
+	if pairOK {
+		log.Printf("[%s] offer received, paired client", peer)
+	} else {
+		log.Printf("[%s] offer received, PIN ok", peer)
+	}
 
 	pc, err := h.api.NewPeerConnection(webrtc.Configuration{ICEServers: h.ice})
 	if err != nil {
@@ -299,7 +320,8 @@ func (h *host) handleOffer(ctx context.Context, m proto.Message) {
 		closeSession()
 		return
 	}
-	h.send(ctx, proto.Message{Type: "answer", To: peer, SDP: answer.SDP})
+	// every successful offer gets a fresh pairing token, so the PIN is typed once
+	h.send(ctx, proto.Message{Type: "answer", To: peer, SDP: answer.SDP, Pair: h.pairs.mint()})
 }
 
 func logSelectedPair(peer string, pc *webrtc.PeerConnection) {

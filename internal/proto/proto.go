@@ -14,6 +14,7 @@ type Message struct {
 
 	SDP       string          `json:"sdp,omitempty"`       // offer / answer
 	PIN       string          `json:"pin,omitempty"`       // offer: the host PIN the client was given
+	Pair      string          `json:"pair,omitempty"`      // offer: a pairing token instead of the PIN; answer: a fresh one
 	Candidate json.RawMessage `json:"candidate,omitempty"` // ice: RTCIceCandidateInit as JSON
 	Hosts     []string        `json:"hosts,omitempty"`     // hosts reply
 	Error     string          `json:"error,omitempty"`

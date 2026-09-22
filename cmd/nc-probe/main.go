@@ -33,6 +33,7 @@ func main() {
 	password := flag.String("password", os.Getenv("NC_PASSWORD"), "rendezvous basic auth password (env NC_PASSWORD)")
 	pin := flag.String("pin", os.Getenv("NC_PIN"), "host PIN (env NC_PIN)")
 	tlsFP := flag.String("tls-fingerprint", os.Getenv("NC_TLS_FP"), "pin the rendezvous certificate by SHA-256 (env NC_TLS_FP)")
+	pair := flag.String("pair", os.Getenv("NC_PAIR"), "pairing token from an earlier connection, used instead of the PIN (env NC_PAIR)")
 	sendInput := flag.Bool("input", false, "send a few test input events over the data channel")
 	flag.Parse()
 
@@ -169,7 +170,7 @@ func main() {
 	}
 	pc.SetLocalDescription(offer)
 	start = time.Now()
-	send(proto.Message{Type: "offer", To: *hostName, SDP: offer.SDP, PIN: *pin})
+	send(proto.Message{Type: "offer", To: *hostName, SDP: offer.SDP, PIN: *pin, Pair: *pair})
 	log.Printf("offer sent to %q via %s", *hostName, wsURL)
 
 	go func() {
@@ -182,6 +183,9 @@ func main() {
 			json.Unmarshal(data, &m)
 			switch m.Type {
 			case "answer":
+				if m.Pair != "" {
+					fmt.Printf("pairing token: %s\n", m.Pair)
+				}
 				pc.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeAnswer, SDP: m.SDP})
 			case "ice":
 				var c webrtc.ICECandidateInit

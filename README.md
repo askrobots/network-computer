@@ -117,9 +117,11 @@ Two layers, both simple on purpose:
    Headless clients (`nc-host`, `nc-probe`) may still use HTTP Basic instead. Set the
    password with `-password` or `NC_PASSWORD`; if unset a random one is generated and
    printed at startup. The username defaults to `nc` (`-user`, `NC_USER`).
-2. **Host PIN.** Each host has a 6-digit PIN (`-pin` or `NC_PIN`, generated if unset). A
-   client must send it with its connection offer or the host refuses. So two people sharing
-   one rendezvous cannot drive each other's machines.
+2. **Host PIN, typed once.** Each host has a 6-digit PIN (`-pin` or `NC_PIN`, generated
+   if unset). The first connection must present it; the host then returns a signed pairing
+   token that the client keeps and sends instead, so the PIN is a one-time step. Two people
+   sharing one rendezvous still cannot drive each other's machines. `nc-host
+   -reset-pairings` revokes every paired client.
 
 Media is encrypted by WebRTC (DTLS-SRTP) whether or not the rendezvous uses TLS. Over
 plain HTTP the *signaling* (credentials, PIN, SDP) is in the clear, which is fine on a

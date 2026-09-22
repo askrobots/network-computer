@@ -74,7 +74,11 @@ the QR-pairing idea from the original plan.
    creates an ECDSA P-256 cert in `-state-dir/tls` on first run and reuses it, so the
    fingerprint is stable. `nc-host`, `nc-probe` take `-tls-fingerprint` / `NC_TLS_FP`
    and accept exactly that key (checked on every connection, resumed ones included).
-4. Per-host pairing token (PIN once).
+4. ~~Per-host pairing token.~~ **Done.** After a correct PIN the host returns a token
+   (HMAC-SHA256, bound to the host name, 90 days) signed with a secret it keeps in
+   `-state-dir/pair.key` (0600). Clients store it per rendezvous+host and send it
+   instead of the PIN, and every successful connect refreshes it. `-reset-pairings`
+   rotates the secret and revokes every pairing. Clients no longer store the PIN.
 5. ~~Per-session TURN credentials.~~ **Done.** TURN REST scheme: each `/config`
    response carries a fresh `<expiry>:<id>` username with an HMAC password under a
    secret only the rendezvous holds (`-turn-secret` / `NC_TURN_SECRET`, random if

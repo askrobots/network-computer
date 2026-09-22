@@ -211,7 +211,7 @@ const store={
 $('#f-url').value  = store.get('url', location.origin);
 $('#f-user').value = store.get('user','nc');
 $('#f-pass').value = store.get('pass','');
-$('#f-pin').value  = store.get('pin','');
+try{localStorage.removeItem('nc.pin')}catch(e){}  // PIN no longer stored; pairing replaces it
 $('#f-cursor').checked = store.get('cursor','1')==='1';
 $('#f-relay').checked  = store.get('relay','0')==='1';
 
@@ -222,6 +222,17 @@ function msg(t,cls){const m=$('#f-msg');m.textContent=t||'';m.className='msg '+(
 function toast(t){const el=$('#toast');el.textContent=t;el.classList.add('on');clearTimeout(el._t);el._t=setTimeout(()=>el.classList.remove('on'),1600);}
 
 let token=null, mode='insecure';
+
+// Pairing: the host returns a signed token after a correct PIN. We keep one per
+// rendezvous+host and send it next time, so the PIN is typed once.
+function pairKey(h){ return 'pair:'+$('#f-url').value.replace(/\/$/,'')+'|'+h; }
+function getPair(h){ return store.get(pairKey(h),''); }
+function setPair(h,t){ store.set(pairKey(h),t); }
+function clearPair(h){ try{localStorage.removeItem('nc.'+pairKey(h))}catch(e){} }
+function showPairState(){
+  const h=$('#f-host').value, paired=!!(h&&getPair(h));
+  $('#f-pin').placeholder = paired ? 'paired — PIN not needed' : '6 digits';
+}
 
 // One credential exchange: POST /auth -> token. The page itself needs no auth,
 // so the browser never shows its own login dialog; this form asks once.
@@ -256,10 +267,12 @@ async function refreshHosts(){
     if(!hosts.length){sel.innerHTML='<option value="">no hosts online</option>';return;}
     for(const h of hosts){const o=document.createElement('option');o.value=o.textContent=h;sel.appendChild(o);}
     if(hosts.includes(prev)) sel.value=prev;
+    showPairState();
     msg('');
   }catch(e){msg(e.message,'err');}
 }
 $('#f-refresh').onclick=refreshHosts;
+$('#f-host').addEventListener('change',showPairState);
 $('#f-url').addEventListener('change',refreshHosts);
 $('#f-pass').addEventListener('change',refreshHosts);
 
@@ -276,7 +289,7 @@ async function startConnect(isRetry){
     hostName=$('#f-host').value;
     if(!hostName){msg('Pick a host','err');return;}
     store.set('url',$('#f-url').value);store.set('user',$('#f-user').value);
-    store.set('pass',$('#f-pass').value);store.set('pin',$('#f-pin').value);
+    store.set('pass',$('#f-pass').value);
     store.set('host',hostName);
     store.set('cursor',$('#f-cursor').checked?'1':'0');
     store.set('relay',$('#f-relay').checked?'1':'0');
@@ -325,7 +338,7 @@ async function openPeer(){
   await openWS();
   const offer=await pc.createOffer();
   await pc.setLocalDescription(offer);
-  sig({type:'offer',to:hostName,sdp:offer.sdp,pin:$('#f-pin').value.trim()});
+  sig({type:'offer',to:hostName,sdp:offer.sdp,pin:$('#f-pin').value.trim(),pair:getPair(hostName)});
 }
 
 function openWS(){
@@ -340,10 +353,11 @@ function openWS(){
 function sig(m){ if(ws&&ws.readyState===1) ws.send(JSON.stringify(m)); }
 
 async function onSignal(m){
-  if(m.type==='answer'){await pc.setRemoteDescription({type:'answer',sdp:m.sdp});}
+  if(m.type==='answer'){ if(m.pair) setPair(hostName,m.pair); await pc.setRemoteDescription({type:'answer',sdp:m.sdp}); }
   else if(m.type==='ice'){try{await pc.addIceCandidate(m.candidate);}catch(e){}}
   else if(m.type==='error'){
     msg(m.error,'err');
+    if(/pairing/i.test(m.error)){ clearPair(hostName); showPairState(); }
     if(/PIN/i.test(m.error)){retryWanted=false;teardown();resetConnectBtn();}
   }
 }
