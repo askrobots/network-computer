@@ -1,0 +1,14 @@
+# System-wide default handlers. Without this the fallback list names the snap
+# Firefox first, which is not installed, and links fail to open.
+[Default Applications]
+x-scheme-handler/http=firefox.desktop
+x-scheme-handler/https=firefox.desktop
+text/html=firefox.desktop
+application/xhtml+xml=firefox.desktop
+text/plain=org.xfce.mousepad.desktop
+inode/directory=thunar.desktop
+
+[Added Associations]
+x-scheme-handler/http=firefox.desktop;
+x-scheme-handler/https=firefox.desktop;
+text/html=firefox.desktop;

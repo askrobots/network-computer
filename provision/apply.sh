@@ -27,6 +27,9 @@ apt-get install -y -q --allow-downgrades firefox
 
 echo ">> config files"
 cp -a files/etc/. /etc/
+# Ubuntu ships an override that re-enables per-user pulseaudio autospawn; we run
+# one system pulse (nc-audio) and clients must attach to it, not spawn their own.
+rm -f /etc/pulse/client.conf.d/01-enable-autospawn.conf
 dconf update || true
 sysctl -p /etc/sysctl.d/99-nc-noipv6.conf >/dev/null 2>&1 || true
 modprobe uinput || true
@@ -71,6 +74,10 @@ systemctl daemon-reload
 systemctl enable --now nc-xorg nc-desktop nc-audio nc-rendezvous nc-host
 sleep 4
 systemctl is-active nc-xorg nc-desktop nc-audio nc-rendezvous nc-host | paste -sd' ' -
+echo
+echo ">> verify"
+sleep 3
+sh "$(dirname "$0")/verify.sh" || echo "!! verify found problems above"
 echo
 echo "rendezvous: http://${NC_PUBLIC_IP}:8765"
 cat /etc/nc/env
