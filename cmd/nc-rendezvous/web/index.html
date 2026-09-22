@@ -162,6 +162,7 @@
     <span class="pill host"><span class="dot" id="dot"></span><span id="p-host">—</span></span>
     <span class="pill" id="p-net">connecting…</span>
     <span class="spacer"></span>
+    <button class="bar-btn" id="b-mic" title="Microphone">🎤</button>
     <button class="bar-btn" id="b-graphs" title="Graphs">📈</button>
     <button class="bar-btn" id="b-stats" title="Stats">📊</button>
     <button class="bar-btn" id="b-keys" title="Keyboard">⌨️</button>
@@ -215,7 +216,7 @@ try{localStorage.removeItem('nc.pin')}catch(e){}  // PIN no longer stored; pairi
 $('#f-cursor').checked = store.get('cursor','1')==='1';
 $('#f-relay').checked  = store.get('relay','0')==='1';
 
-let ws, pc, dc, statsTimer, watchdog, cfg, hostName;
+let ws, pc, dc, statsTimer, watchdog, cfg, hostName, audioTx=null, micStream=null;
 let localCursor=true, retryWanted=false, retries=0, lastFrames=0;
 
 function msg(t,cls){const m=$('#f-msg');m.textContent=t||'';m.className='msg '+(cls||'info');}
@@ -317,7 +318,7 @@ async function openPeer(){
   video.srcObject=stream;
 
   pc.addTransceiver('video',{direction:'recvonly'});
-  pc.addTransceiver('audio',{direction:'recvonly'});
+  audioTx = pc.addTransceiver('audio',{direction:'sendrecv'}); // mic attached on demand
   dc=pc.createDataChannel('input',{ordered:false,maxRetransmits:0});
 
   pc.ontrack=ev=>{
@@ -387,7 +388,7 @@ function onDropped(){
 }
 
 function teardown(){
-  retryWanted=false; stopTimers();
+  retryWanted=false; stopTimers(); setMic(false);
   try{dc&&dc.close()}catch(e){} try{pc&&pc.close()}catch(e){} try{ws&&ws.close()}catch(e){}
   const v=$('#v'); v.srcObject=null;
   $('#session').classList.remove('on');
@@ -488,6 +489,26 @@ function startStats(){
   },1000);
 }
 function stopTimers(){clearInterval(statsTimer);clearInterval(watchdog);}
+
+/* ---------- microphone ---------- */
+// The browser only allows microphone access on https (or localhost), so on a
+// plain-http rendezvous this explains why instead of failing silently.
+async function setMic(on){
+  const btn=$('#b-mic');
+  if(on){
+    if(!window.isSecureContext){ toast('Microphone needs secure mode (https)'); return; }
+    try{
+      micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
+      await audioTx.sender.replaceTrack(micStream.getAudioTracks()[0]);
+      btn.classList.add('active'); toast('Microphone on');
+    }catch(e){ toast('Microphone blocked: '+e.message); }
+  }else{
+    if(audioTx) await audioTx.sender.replaceTrack(null);
+    if(micStream){ micStream.getTracks().forEach(t=>t.stop()); micStream=null; }
+    btn.classList.remove('active');
+  }
+}
+$('#b-mic').onclick=()=>setMic(!micStream);
 
 /* ---------- fullscreen ---------- */
 $('#b-full').onclick=()=>{

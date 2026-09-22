@@ -193,7 +193,12 @@ which matters as soon as the phone both hears the desktop and sends its mic.
 
 ### Order
 1. Desktop audio to phone on Linux and macOS (macOS via BlackHole until the native shim).
-2. Phone mic to desktop on Linux, then macOS.
+   **Linux done.**
+2. Phone mic to desktop on Linux, then macOS. **Linux done 2026-09-22:** the client's
+   mic track is played into pulse sink `nc-mic`; source `nc-mic-in` ("Phone
+   microphone") is the desktop's default input; `nc-mic-scope` shows a live waveform.
+   Verified with `nc-probe -mic-tone 440`: -91 dB silence -> -24 dB with the tone.
+   macOS path exists in code (`-mic-device <BlackHole index>`), untested.
 3. Files and clipboard.
 4. Phone camera to desktop on Linux, then the macOS Camera Extension.
 5. Windows audio; Windows mic and camera last.
