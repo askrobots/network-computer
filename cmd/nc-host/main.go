@@ -25,6 +25,7 @@ import (
 
 	"github.com/askrobots/network-computer/internal/input"
 	"github.com/askrobots/network-computer/internal/proto"
+	"github.com/askrobots/network-computer/internal/tlspin"
 )
 
 type host struct {
@@ -35,6 +36,7 @@ type host struct {
 	dryRun              bool
 	api                 *webrtc.API
 	user, password, pin string
+	httpc               *http.Client // pinned when -tls-fingerprint is set
 
 	mu       sync.Mutex
 	ws       *websocket.Conn
@@ -60,6 +62,7 @@ func main() {
 	user := flag.String("user", envOr("NC_USER", "nc"), "rendezvous basic auth username (env NC_USER)")
 	password := flag.String("password", os.Getenv("NC_PASSWORD"), "rendezvous basic auth password (env NC_PASSWORD)")
 	pin := flag.String("pin", os.Getenv("NC_PIN"), "PIN a client must present to connect to this host (env NC_PIN); generated and printed if empty")
+	tlsFP := flag.String("tls-fingerprint", os.Getenv("NC_TLS_FP"), "pin the rendezvous certificate by SHA-256 (env NC_TLS_FP); for a self-signed rendezvous")
 	dryRun := flag.Bool("dry-run", false, "log input events instead of injecting them")
 	flag.Parse()
 
@@ -68,6 +71,7 @@ func main() {
 	}
 	log.Printf("host PIN: %s   (clients must enter this to connect)", *pin)
 	h := &host{name: *name, audio: *audio, dryRun: *dryRun, sessions: map[string]*session{}, user: *user, password: *password, pin: *pin}
+	h.httpc = tlspin.Client(*tlsFP)
 	h.capture = captureOpts{Display: *display, FPS: *fps, Bitrate: *bitrate, Encoder: *encoder, Extra: *extra, Custom: *custom}
 	if *size != "" && *size != "native" {
 		fmt.Sscanf(*size, "%dx%d", &h.capture.Width, &h.capture.Height)
@@ -84,7 +88,7 @@ func main() {
 	var cfg proto.Config
 	req, _ := http.NewRequest("GET", *rz+"/config", nil)
 	req.SetBasicAuth(h.user, h.password)
-	if resp, err := http.DefaultClient.Do(req); err == nil {
+	if resp, err := h.httpc.Do(req); err == nil {
 		if resp.StatusCode == http.StatusUnauthorized {
 			log.Fatalf("rendezvous rejected the password (use -password or NC_PASSWORD)")
 		}
@@ -116,7 +120,7 @@ func main() {
 func (h *host) runSignaling(ctx context.Context, url string) error {
 	hdr := http.Header{}
 	hdr.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(h.user+":"+h.password)))
-	conn, _, err := websocket.Dial(ctx, url, &websocket.DialOptions{HTTPHeader: hdr})
+	conn, _, err := websocket.Dial(ctx, url, &websocket.DialOptions{HTTPHeader: hdr, HTTPClient: h.httpc})
 	if err != nil {
 		return err
 	}

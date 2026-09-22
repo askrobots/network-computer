@@ -21,6 +21,7 @@ import (
 	"github.com/pion/webrtc/v4"
 
 	"github.com/askrobots/network-computer/internal/proto"
+	"github.com/askrobots/network-computer/internal/tlspin"
 )
 
 func main() {
@@ -31,13 +32,15 @@ func main() {
 	user := flag.String("user", envOr("NC_USER", "nc"), "rendezvous basic auth username")
 	password := flag.String("password", os.Getenv("NC_PASSWORD"), "rendezvous basic auth password (env NC_PASSWORD)")
 	pin := flag.String("pin", os.Getenv("NC_PIN"), "host PIN (env NC_PIN)")
+	tlsFP := flag.String("tls-fingerprint", os.Getenv("NC_TLS_FP"), "pin the rendezvous certificate by SHA-256 (env NC_TLS_FP)")
 	sendInput := flag.Bool("input", false, "send a few test input events over the data channel")
 	flag.Parse()
 
+	httpc := tlspin.Client(*tlsFP)
 	authGet := func(url string) *http.Response {
 		req, _ := http.NewRequest("GET", url, nil)
 		req.SetBasicAuth(*user, *password)
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := httpc.Do(req)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -77,7 +80,7 @@ func main() {
 	wsURL := strings.Replace(strings.Replace(*rz, "https://", "wss://", 1), "http://", "ws://", 1) + "/ws"
 	hdr := http.Header{}
 	hdr.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(*user+":"+*password)))
-	ws, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{HTTPHeader: hdr})
+	ws, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{HTTPHeader: hdr, HTTPClient: httpc})
 	if err != nil {
 		log.Fatal(err)
 	}

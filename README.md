@@ -89,6 +89,14 @@ NC_PASSWORD=change-me ./bin/nc-rendezvous -http :8765 -turn :3478 -public-ip 203
 # with a Let's Encrypt certificate instead (listens on 443 and 80):
 NC_PASSWORD=change-me ./bin/nc-rendezvous -turn :3478 -public-ip 203.0.113.5 -acme-domain nc.example.com
 
+# no domain? secure mode makes a self-signed cert (kept in -state-dir, so it is
+# stable across restarts) and prints its SHA-256 fingerprint for clients to pin:
+NC_PASSWORD=change-me ./bin/nc-rendezvous -http :8765 -turn :3478 -public-ip 203.0.113.5 -mode secure
+#   ... secure mode: HTTPS on :8765
+#   ...   sha256 6381268cf1b96418c9c3...
+# then give nc-host / nc-probe that fingerprint:
+NC_TLS_FP=6381268c... NC_PASSWORD=change-me ./bin/nc-host -rendezvous https://nc.example.com:8765 -name mybox
+
 # on the desktop behind NAT
 NC_PASSWORD=change-me ./bin/nc-host -rendezvous https://nc.example.com -name mybox
 
@@ -117,8 +125,10 @@ Media is encrypted by WebRTC (DTLS-SRTP) whether or not the rendezvous uses TLS.
 plain HTTP the *signaling* (credentials, PIN, SDP) is in the clear, which is fine on a
 trusted LAN and not for the open internet — run with `-acme-domain` or `-tls-cert` there.
 `/config` reports `mode` as `secure` or `insecure` so clients can show which they are in.
-TURN credentials are still static; per-session credentials and key-based pairing are on
-the plan. See [docs/SECURITY.md](docs/SECURITY.md).
+`-mode auto|secure|insecure` forces the posture: `secure` refuses to run without TLS
+(making a self-signed cert if you gave none), `insecure` refuses TLS flags. TURN relay
+credentials are minted per `/config` request and expire after 12 hours, so a leaked one
+goes stale on its own. See [docs/SECURITY.md](docs/SECURITY.md).
 
 ## Host options worth knowing
 

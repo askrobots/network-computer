@@ -20,6 +20,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -163,23 +164,18 @@ func (h *hub) serveWS(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// startTURN runs STUN and TURN on one UDP socket using pion/turn. Static
-// credentials for the spike; per-session credentials minted by the signaling
-// layer come later.
-func startTURN(addr, publicIP, realm, user, pass string) (*turn.Server, error) {
+// startTURN runs STUN and TURN on one UDP socket using pion/turn. Relay access
+// uses short-lived TURN REST credentials (username "<expiry>:<id>", password an
+// HMAC of it under a secret only this process knows), minted per /config
+// request. A leaked credential stops working when it expires.
+func startTURN(addr, publicIP, realm, secret string) (*turn.Server, error) {
 	pc, err := net.ListenPacket("udp4", addr)
 	if err != nil {
 		return nil, err
 	}
-	key := turn.GenerateAuthKey(user, realm, pass)
 	return turn.NewServer(turn.ServerConfig{
-		Realm: realm,
-		AuthHandler: func(username string, realm string, srcAddr net.Addr) ([]byte, bool) {
-			if username == user {
-				return key, true
-			}
-			return nil, false
-		},
+		Realm:       realm,
+		AuthHandler: turn.LongTermTURNRESTAuthHandler(secret, nil),
 		PacketConnConfigs: []turn.PacketConnConfig{{
 			PacketConn: pc,
 			RelayAddressGenerator: &turn.RelayAddressGeneratorStatic{
@@ -191,23 +187,42 @@ func startTURN(addr, publicIP, realm, user, pass string) (*turn.Server, error) {
 }
 
 func main() {
-	httpAddr := flag.String("http", ":8080", "HTTP listen address (signaling + test page)")
+	httpAddr := flag.String("http", ":8080", "listen address (signaling + web client)")
 	turnAddr := flag.String("turn", ":3478", "STUN/TURN UDP listen address ('' to disable)")
 	publicIP := flag.String("public-ip", "", "public IP of this machine, advertised for TURN relay and in /config")
 	publicHost := flag.String("public-host", "", "public hostname for /config ice urls (defaults to -public-ip)")
 	realm := flag.String("realm", "nc", "TURN realm")
-	turnUser := flag.String("turn-user", "nc", "TURN username")
-	turnPass := flag.String("turn-pass", "nc-spike", "TURN password")
+	turnSecret := flag.String("turn-secret", os.Getenv("NC_TURN_SECRET"), "secret for minting per-session TURN credentials (env NC_TURN_SECRET); random if empty")
+	mode := flag.String("mode", "auto", "auto | secure | insecure. secure forces TLS (self-signed if no cert is given); insecure forces plain HTTP")
+	tlsSelf := flag.Bool("tls-self", false, "serve TLS with a persisted self-signed cert; clients pin its fingerprint")
 	certFile := flag.String("tls-cert", "", "TLS cert file (optional)")
 	keyFile := flag.String("tls-key", "", "TLS key file (optional)")
-	authUser := flag.String("user", envOr("NC_USER", "nc"), "basic auth username (env NC_USER)")
-	authPass := flag.String("password", os.Getenv("NC_PASSWORD"), "basic auth password (env NC_PASSWORD); generated and printed if empty")
+	stateDir := flag.String("state-dir", defaultStateDir(), "where the self-signed cert and ACME cache live")
+	authUser := flag.String("user", envOr("NC_USER", "nc"), "username (env NC_USER)")
+	authPass := flag.String("password", os.Getenv("NC_PASSWORD"), "password (env NC_PASSWORD); generated and printed if empty")
 	acmeDomain := flag.String("acme-domain", "", "get a Let's Encrypt cert for this domain (listens on :443 and :80)")
 	flag.Parse()
 
 	if *authPass == "" {
 		*authPass = randomToken(12)
 		log.Printf("no -password given, generated one: %s   (pass it to nc-host and nc-probe as -password, or set NC_PASSWORD)", *authPass)
+	}
+	if *turnSecret == "" {
+		*turnSecret = randomToken(24)
+	}
+
+	switch *mode {
+	case "auto":
+	case "secure":
+		if *acmeDomain == "" && *certFile == "" {
+			*tlsSelf = true
+		}
+	case "insecure":
+		if *acmeDomain != "" || *certFile != "" || *tlsSelf {
+			log.Fatal("-mode insecure conflicts with -acme-domain / -tls-cert / -tls-self")
+		}
+	default:
+		log.Fatalf("-mode must be auto, secure or insecure, not %q", *mode)
 	}
 
 	if *publicIP == "" {
@@ -219,31 +234,51 @@ func main() {
 	}
 	_, turnPort, _ := net.SplitHostPort(*turnAddr)
 
+	fingerprint := ""
+	if *tlsSelf {
+		var err error
+		*certFile, *keyFile, fingerprint, err = selfSignedCert(filepath.Join(*stateDir, "tls"),
+			[]string{*publicHost, *publicIP, guessLocalIP(), "127.0.0.1", "localhost"})
+		if err != nil {
+			log.Fatalf("self-signed cert: %v", err)
+		}
+	}
+	secure := *acmeDomain != "" || *certFile != ""
+
 	h := newHub()
 
 	if *turnAddr != "" {
-		srv, err := startTURN(*turnAddr, *publicIP, *realm, *turnUser, *turnPass)
+		srv, err := startTURN(*turnAddr, *publicIP, *realm, *turnSecret)
 		if err != nil {
 			log.Fatalf("turn: %v", err)
 		}
 		defer srv.Close()
-		log.Printf("STUN/TURN on udp %s, relay address %s", *turnAddr, *publicIP)
-	}
-
-	cfg := proto.Config{}
-	if *turnAddr != "" {
-		hp := net.JoinHostPort(*publicHost, turnPort)
-		cfg.ICEServers = []proto.ICEServer{
-			{URLs: []string{"stun:" + hp}},
-			{URLs: []string{"turn:" + hp + "?transport=udp"}, Username: *turnUser, Credential: *turnPass},
-		}
+		log.Printf("STUN/TURN on udp %s, relay address %s, per-session credentials", *turnAddr, *publicIP)
 	}
 
 	auth := newAuthority(*authUser, *authPass)
-	// secure mode = signaling is over TLS; clients show which they are in.
-	cfg.Mode = "insecure"
-	if *acmeDomain != "" || *certFile != "" {
-		cfg.Mode = "secure"
+	postureName := "insecure"
+	if secure {
+		postureName = "secure"
+	}
+
+	// configFor builds /config for one caller, with fresh relay credentials.
+	configFor := func() proto.Config {
+		cfg := proto.Config{Mode: postureName}
+		if *turnAddr == "" {
+			return cfg
+		}
+		hp := net.JoinHostPort(*publicHost, turnPort)
+		user, pass, err := turn.GenerateLongTermTURNRESTCredentials(*turnSecret, randomToken(8), tokenTTL)
+		if err != nil {
+			log.Printf("turn creds: %v", err)
+			return cfg
+		}
+		cfg.ICEServers = []proto.ICEServer{
+			{URLs: []string{"stun:" + hp}},
+			{URLs: []string{"turn:" + hp + "?transport=udp"}, Username: user, Credential: pass},
+		}
+		return cfg
 	}
 
 	sub, _ := fs.Sub(webFS, "web")
@@ -270,7 +305,7 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]any{
 			"token":     auth.mint(),
 			"expiresIn": int(tokenTTL.Seconds()),
-			"mode":      cfg.Mode,
+			"mode":      postureName,
 		})
 	})
 
@@ -278,7 +313,8 @@ func main() {
 	mux.Handle("/config", auth.guard(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		json.NewEncoder(w).Encode(cfg)
+		w.Header().Set("Cache-Control", "no-store") // relay creds are per request
+		json.NewEncoder(w).Encode(configFor())
 	})))
 	mux.Handle("/hosts", auth.guard(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -295,18 +331,25 @@ func main() {
 		m := &autocert.Manager{
 			Prompt:     autocert.AcceptTOS,
 			HostPolicy: autocert.HostWhitelist(*acmeDomain),
-			Cache:      autocert.DirCache("acme-cache"),
+			Cache:      autocert.DirCache(filepath.Join(*stateDir, "acme")),
 		}
 		srv.Addr = ":443"
 		srv.TLSConfig = &tls.Config{GetCertificate: m.GetCertificate, MinVersion: tls.VersionTLS12}
 		go http.ListenAndServe(":80", m.HTTPHandler(nil))
-		log.Printf("HTTPS on :443 for %s (ACME)", *acmeDomain)
+		log.Printf("secure mode: HTTPS on :443 for %s (ACME)", *acmeDomain)
 		log.Fatal(srv.ListenAndServeTLS("", ""))
 	case *certFile != "":
-		log.Printf("HTTPS on %s", *httpAddr)
+		srv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+		log.Printf("secure mode: HTTPS on %s  (web client: https://%s%s/)", *httpAddr, *publicHost, portSuffix(*httpAddr))
+		if fingerprint != "" {
+			log.Printf("self-signed cert. Pin this fingerprint in clients (-tls-fingerprint / NC_TLS_FP):")
+			log.Printf("  sha256 %s", fingerprint)
+			log.Printf("browsers will ask once to accept the certificate")
+		}
 		log.Fatal(srv.ListenAndServeTLS(*certFile, *keyFile))
 	default:
-		log.Printf("HTTP on %s  (test page: http://%s%s/)", *httpAddr, *publicHost, portSuffix(*httpAddr))
+		log.Printf("insecure mode: plain HTTP on %s  (web client: http://%s%s/). Signaling is unencrypted; use -mode secure off a trusted LAN.",
+			*httpAddr, *publicHost, portSuffix(*httpAddr))
 		log.Fatal(srv.ListenAndServe())
 	}
 }

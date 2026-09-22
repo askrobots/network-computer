@@ -68,9 +68,14 @@ the QR-pairing idea from the original plan.
    The page is public (no browser dialog), `POST /auth` mints a 12-hour HMAC token,
    and `/config`, `/hosts` and `/ws` accept Bearer / `?token=` / Basic. 401s carry no
    `WWW-Authenticate`, so nothing pops a native login box.
-2. `/config` now reports `mode` (`secure` when TLS is on, else `insecure`) and the
-   browser client shows it in the session bar. A `-mode` flag to *force* the posture
-   is still to do.
-3. Self-signed + fingerprint pinning for domain-less secure mode.
+2. ~~Mode flag.~~ **Done.** `-mode auto|secure|insecure`. `/config` and `/auth` report
+   the posture and both clients show "insecure" in the session bar.
+3. ~~Self-signed + fingerprint pinning.~~ **Done.** `-mode secure` (or `-tls-self`)
+   creates an ECDSA P-256 cert in `-state-dir/tls` on first run and reuses it, so the
+   fingerprint is stable. `nc-host`, `nc-probe` take `-tls-fingerprint` / `NC_TLS_FP`
+   and accept exactly that key (checked on every connection, resumed ones included).
 4. Per-host pairing token (PIN once).
-5. Per-session TURN credentials.
+5. ~~Per-session TURN credentials.~~ **Done.** TURN REST scheme: each `/config`
+   response carries a fresh `<expiry>:<id>` username with an HMAC password under a
+   secret only the rendezvous holds (`-turn-secret` / `NC_TURN_SECRET`, random if
+   unset). Verified by forcing a relayed session.
