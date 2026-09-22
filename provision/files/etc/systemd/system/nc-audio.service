@@ -5,7 +5,7 @@ Environment=HOME=/root
 RuntimeDirectory=nc-pulse
 RuntimeDirectoryMode=0755
 ExecStart=/usr/bin/pulseaudio --daemonize=no --exit-idle-time=-1 --disallow-exit --load="module-native-protocol-unix auth-anonymous=1 socket=/run/nc-pulse/native"
-ExecStartPost=/bin/sh -c "sleep 2; pactl load-module module-null-sink sink_name=nc rate=48000 channels=2 sink_properties=device.description=network-computer; pactl set-default-sink nc"
+ExecStartPost=/usr/local/bin/nc-audio-setup
 Restart=always
 [Install]
 WantedBy=multi-user.target

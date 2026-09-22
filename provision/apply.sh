@@ -13,6 +13,21 @@ GO_VERSION=1.27.1
 NC_PUBLIC_IP=${NC_PUBLIC_IP:-$(curl -s -4 ifconfig.me)}
 NC_HOST_NAME=${NC_HOST_NAME:-cloudbox}
 
+# What each service depends on. apply.sh restarts a running service only when
+# one of these changed, so re-provisioning takes effect without killing the
+# desktop session for nothing.
+deps() {
+  case $1 in
+    xorg)       echo /etc/systemd/system/nc-xorg.service /etc/X11/xorg.conf.d/10-dummy.conf ;;
+    desktop)    echo /etc/systemd/system/nc-desktop.service ;;
+    audio)      echo /etc/systemd/system/nc-audio.service /usr/local/bin/nc-audio-setup /etc/pulse/client.conf /etc/pulse/daemon.conf.d/nc.conf ;;
+    rendezvous) echo /etc/systemd/system/nc-rendezvous.service /usr/local/bin/nc-rendezvous /etc/nc/env ;;
+    host)       echo /etc/systemd/system/nc-host.service /usr/local/bin/nc-host /etc/nc/env ;;
+  esac
+}
+snapshot() { for s in xorg desktop audio rendezvous host; do echo "$s $(cat $(deps $s) 2>/dev/null | md5sum | cut -c1-12)"; done; }
+BEFORE=$(snapshot)
+
 echo ">> packages"
 apt-get update -q
 grep -vE '^\s*#|^\s*$' packages.txt | xargs apt-get install -y -q
@@ -27,6 +42,7 @@ apt-get install -y -q --allow-downgrades firefox
 
 echo ">> config files"
 cp -a files/etc/. /etc/
+cp -a files/usr/. /usr/
 # Ubuntu ships an override that re-enables per-user pulseaudio autospawn; we run
 # one system pulse (nc-audio) and clients must attach to it, not spawn their own.
 rm -f /etc/pulse/client.conf.d/01-enable-autospawn.conf
@@ -70,7 +86,18 @@ ufw allow 3478/udp >/dev/null; ufw allow 49152:65535/udp >/dev/null
 ufw --force enable >/dev/null
 
 echo ">> services"
+AFTER=$(snapshot)
 systemctl daemon-reload
+for s in xorg desktop audio rendezvous host; do
+  was=$(echo "$BEFORE" | awk -v s=$s '$1==s{print $2}')
+  now=$(echo "$AFTER"  | awk -v s=$s '$1==s{print $2}')
+  if [ "$was" != "$now" ] && systemctl is-active --quiet nc-$s; then
+    echo "   nc-$s changed, restarting"
+    systemctl restart nc-$s
+    # the host captures from pulse; give it a fresh start after audio restarts
+    [ $s = audio ] && systemctl is-active --quiet nc-host && systemctl restart nc-host
+  fi
+done
 systemctl enable --now nc-xorg nc-desktop nc-audio nc-rendezvous nc-host
 sleep 4
 systemctl is-active nc-xorg nc-desktop nc-audio nc-rendezvous nc-host | paste -sd' ' -

@@ -3,6 +3,7 @@
 ffmpeg
 pulseaudio
 pulseaudio-utils
+pavucontrol
 # Headless desktop
 xserver-xorg-core
 xserver-xorg-video-dummy

@@ -26,6 +26,11 @@ check "virtual sink 'nc' exists"         sh -c 'pactl list short sinks | grep -q
 check "sink runs at 48 kHz"              sh -c 'pactl list short sinks | grep -P "\tnc\t" | grep -q 48000Hz'
 check "'nc' is the default sink"         sh -c '[ "$(pactl get-default-sink)" = nc ]'
 check "pulse socket at /run/nc-pulse"    test -S /run/nc-pulse/native
+check "mic sink 'nc-mic' exists"          sh -c 'pactl list short sinks | grep -qP "^\d+\tnc-mic\t"'
+check "phone mic is the default input"   sh -c '[ "$(pactl get-default-source)" = nc-mic-in ]'
+check "host plays client mic (-mic-device)" sh -c 'systemctl cat nc-host | grep -q -- "-mic-device nc-mic"'
+check "waveform launcher installed"      sh -c 'command -v ffplay && command -v nc-mic-scope && test -f /usr/share/applications/nc-mic-scope.desktop'
+check "pavucontrol installed"            command -v pavucontrol
 check "no pulse autospawn override"      sh -c '! test -e /etc/pulse/client.conf.d/01-enable-autospawn.conf'
 
 echo "browser + default apps"

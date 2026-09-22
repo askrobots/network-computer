@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Phone microphone
+Comment=Live waveform of the microphone coming from the connected phone
+Exec=nc-mic-scope
+Icon=audio-input-microphone
+Categories=AudioVideo;Audio;
+Terminal=false

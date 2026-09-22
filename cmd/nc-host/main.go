@@ -33,6 +33,7 @@ type host struct {
 	ice                 []webrtc.ICEServer
 	capture             captureOpts
 	audio               string
+	mic                 string
 	dryRun              bool
 	api                 *webrtc.API
 	user, password, pin string
@@ -60,6 +61,7 @@ func main() {
 	extra := flag.String("ffmpeg-extra", "", "extra ffmpeg args inserted before the output")
 	custom := flag.String("ffmpeg-args", "", "full ffmpeg argument string; must end with '-f h264 pipe:1'")
 	audio := flag.String("audio-device", "", "capture audio from this device (mac: avfoundation index; linux: pulse source; '' = no audio)")
+	mic := flag.String("mic-device", "", "play the client's microphone into this device (linux: pulse sink such as nc-mic; mac: output device index, e.g. BlackHole; '' = ignore)")
 	user := flag.String("user", envOr("NC_USER", "nc"), "rendezvous basic auth username (env NC_USER)")
 	password := flag.String("password", os.Getenv("NC_PASSWORD"), "rendezvous basic auth password (env NC_PASSWORD)")
 	pin := flag.String("pin", os.Getenv("NC_PIN"), "PIN a client must present to connect to this host (env NC_PIN); generated and printed if empty")
@@ -73,7 +75,7 @@ func main() {
 		*pin = randomPIN()
 	}
 	log.Printf("host PIN: %s   (clients must enter this to connect)", *pin)
-	h := &host{name: *name, audio: *audio, dryRun: *dryRun, sessions: map[string]*session{}, user: *user, password: *password, pin: *pin}
+	h := &host{name: *name, audio: *audio, mic: *mic, dryRun: *dryRun, sessions: map[string]*session{}, user: *user, password: *password, pin: *pin}
 	h.httpc = tlspin.Client(*tlsFP)
 	pairs, err := loadPairing(*name, *stateDir, *resetPairs)
 	if err != nil {
@@ -248,6 +250,15 @@ func (h *host) handleOffer(ctx context.Context, m proto.Message) {
 			}
 		}
 	}()
+
+	// The client's microphone arrives as an incoming audio track.
+	pc.OnTrack(func(track *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
+		if track.Kind() == webrtc.RTPCodecTypeAudio {
+			go playMic(sctx, track, h.mic)
+			return
+		}
+		go drain(track)
+	})
 
 	var audioTrack *webrtc.TrackLocalStaticSample
 	if h.audio != "" {

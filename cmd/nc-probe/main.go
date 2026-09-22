@@ -13,12 +13,15 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/coder/websocket"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
+	"github.com/pion/webrtc/v4/pkg/media"
+	"github.com/pion/webrtc/v4/pkg/media/oggreader"
 
 	"github.com/askrobots/network-computer/internal/proto"
 	"github.com/askrobots/network-computer/internal/tlspin"
@@ -35,6 +38,7 @@ func main() {
 	tlsFP := flag.String("tls-fingerprint", os.Getenv("NC_TLS_FP"), "pin the rendezvous certificate by SHA-256 (env NC_TLS_FP)")
 	pair := flag.String("pair", os.Getenv("NC_PAIR"), "pairing token from an earlier connection, used instead of the PIN (env NC_PAIR)")
 	sendInput := flag.Bool("input", false, "send a few test input events over the data channel")
+	micTone := flag.Int("mic-tone", 0, "send a sine tone of this frequency (Hz) as the probe's microphone, to test mic passthrough")
 	flag.Parse()
 
 	httpc := tlspin.Client(*tlsFP)
@@ -98,7 +102,16 @@ func main() {
 	}
 	defer pc.Close()
 	pc.AddTransceiverFromKind(webrtc.RTPCodecTypeVideo, webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionRecvonly})
-	pc.AddTransceiverFromKind(webrtc.RTPCodecTypeAudio, webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionRecvonly})
+	var micTrack *webrtc.TrackLocalStaticSample
+	if *micTone > 0 {
+		// sendrecv audio: we hear the desktop and send our "microphone"
+		micTrack, _ = webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus, ClockRate: 48000, Channels: 2}, "mic", "probe")
+		if _, err := pc.AddTrack(micTrack); err != nil {
+			log.Fatalf("mic track: %v", err)
+		}
+	} else {
+		pc.AddTransceiverFromKind(webrtc.RTPCodecTypeAudio, webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionRecvonly})
+	}
 	dc, _ := pc.CreateDataChannel("input", nil)
 
 	connected := make(chan struct{})
@@ -213,6 +226,11 @@ func main() {
 		fmt.Printf("path: %s  local %s %s:%d  <->  remote %s %s:%d\n", kind, p.Local.Typ, p.Local.Address, p.Local.Port, p.Remote.Typ, p.Remote.Address, p.Remote.Port)
 	}
 
+	if micTrack != nil {
+		go sendTone(ctx, micTrack, *micTone)
+		log.Printf("sending a %d Hz tone as the microphone", *micTone)
+	}
+
 	if *sendInput {
 		go func() {
 			<-time.After(time.Second)
@@ -274,4 +292,42 @@ func isKeyframe(p *rtp.Packet) bool {
 		return pl[1]&0x80 != 0 && pl[1]&0x1f == 5
 	}
 	return false
+}
+
+// sendTone encodes a sine wave to Opus with ffmpeg and sends it as a
+// microphone track, paced by the Ogg granule positions.
+func sendTone(ctx context.Context, track *webrtc.TrackLocalStaticSample, hz int) {
+	cmd := exec.CommandContext(ctx, "ffmpeg", "-hide_banner", "-loglevel", "error", "-re",
+		"-f", "lavfi", "-i", fmt.Sprintf("sine=frequency=%d:sample_rate=48000", hz), "-ac", "2",
+		"-c:a", "libopus", "-b:a", "64k", "-frame_duration", "20", "-page_duration", "20000",
+		"-f", "opus", "pipe:1")
+	out, err := cmd.StdoutPipe()
+	if err == nil {
+		err = cmd.Start()
+	}
+	if err != nil {
+		log.Printf("tone ffmpeg: %v", err)
+		return
+	}
+	defer cmd.Wait()
+	ogg, _, err := oggreader.NewWith(out)
+	if err != nil {
+		log.Printf("tone ogg: %v", err)
+		return
+	}
+	var last uint64
+	for {
+		page, hdr, err := ogg.ParseNextPage()
+		if err != nil {
+			return
+		}
+		d := time.Duration(hdr.GranulePosition-last) * time.Second / 48000
+		last = hdr.GranulePosition
+		if d <= 0 || d > 200*time.Millisecond {
+			d = 20 * time.Millisecond
+		}
+		if err := track.WriteSample(media.Sample{Data: page, Duration: d}); err != nil {
+			return
+		}
+	}
 }
