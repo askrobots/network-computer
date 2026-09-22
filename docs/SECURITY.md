@@ -64,9 +64,13 @@ the QR-pairing idea from the original plan.
   rendezvous when it hands out `/config`).
 
 ## Order to build
-1. Token auth (`/auth` → token; token on WS query param). Removes the double
-   prompt and lets browsers authenticate the WebSocket without Basic caching.
-2. `-mode` flag + `/config` reporting the mode; client shows secure/insecure.
+1. ~~Token auth (`/auth` → token; token on WS query param).~~ **Done 2026-09-22.**
+   The page is public (no browser dialog), `POST /auth` mints a 12-hour HMAC token,
+   and `/config`, `/hosts` and `/ws` accept Bearer / `?token=` / Basic. 401s carry no
+   `WWW-Authenticate`, so nothing pops a native login box.
+2. `/config` now reports `mode` (`secure` when TLS is on, else `insecure`) and the
+   browser client shows it in the session bar. A `-mode` flag to *force* the posture
+   is still to do.
 3. Self-signed + fingerprint pinning for domain-less secure mode.
 4. Per-host pairing token (PIN once).
 5. Per-session TURN credentials.

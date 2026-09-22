@@ -221,10 +221,28 @@ let localCursor=true, retryWanted=false, retries=0, lastFrames=0;
 function msg(t,cls){const m=$('#f-msg');m.textContent=t||'';m.className='msg '+(cls||'info');}
 function toast(t){const el=$('#toast');el.textContent=t;el.classList.add('on');clearTimeout(el._t);el._t=setTimeout(()=>el.classList.remove('on'),1600);}
 
+let token=null, mode='insecure';
+
+// One credential exchange: POST /auth -> token. The page itself needs no auth,
+// so the browser never shows its own login dialog; this form asks once.
+async function authenticate(){
+  const base=$('#f-url').value.replace(/\/$/,'');
+  const r=await fetch(base+'/auth',{
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({user:$('#f-user').value, password:$('#f-pass').value}),
+  });
+  if(r.status===401) throw new Error('Password rejected');
+  if(!r.ok) throw new Error('Rendezvous HTTP '+r.status);
+  const j=await r.json();
+  token=j.token; mode=j.mode||'insecure';
+  return token;
+}
+
 async function api(path){
   const url=$('#f-url').value.replace(/\/$/,'')+path;
-  const auth='Basic '+btoa($('#f-user').value+':'+$('#f-pass').value);
-  const r=await fetch(url,{headers:{Authorization:auth}});
+  if(!token) await authenticate();
+  let r=await fetch(url,{headers:{Authorization:'Bearer '+token}});
+  if(r.status===401){ token=null; await authenticate(); r=await fetch(url,{headers:{Authorization:'Bearer '+token}}); }
   if(r.status===401) throw new Error('Password rejected');
   if(!r.ok) throw new Error('HTTP '+r.status);
   return r.json();
@@ -247,7 +265,7 @@ $('#f-pass').addEventListener('change',refreshHosts);
 
 function wsURL(){
   const u=new URL($('#f-url').value);
-  return (u.protocol==='https:'?'wss:':'ws:')+'//'+u.host+'/ws';
+  return (u.protocol==='https:'?'wss:':'ws:')+'//'+u.host+'/ws?token='+encodeURIComponent(token||'');
 }
 
 $('#f-connect').onclick=()=>startConnect(false);
@@ -268,6 +286,7 @@ async function startConnect(isRetry){
   btn.disabled=true; btn.classList.add('busy'); btn.textContent='Connecting…';
   msg('fetching config…');
   try{
+    await authenticate();
     cfg=await api('/config');
     await openPeer();
   }catch(e){
@@ -311,10 +330,7 @@ async function openPeer(){
 
 function openWS(){
   return new Promise((res,rej)=>{
-    ws=new WebSocket(wsURL());
-    // pass auth via subprotocol is not possible; rely on cookie-less same-origin.
-    // The rendezvous also accepts the Authorization header on the HTTP upgrade,
-    // which the browser sends automatically after the fetch() 401 handshake.
+    ws=new WebSocket(wsURL());  // token travels in the query string
     ws.onopen=()=>res();
     ws.onerror=e=>rej(new Error('signaling failed (check URL/password)'));
     ws.onmessage=ev=>onSignal(JSON.parse(ev.data));
@@ -429,7 +445,7 @@ function startStats(){
       relay=(l&&l.candidateType==='relay')||(rc&&rc.candidateType==='relay');
       net=(relay?'relay':'direct')+' · '+((pair.currentRoundTripTime||0)*1000).toFixed(0)+'ms';
     }
-    $('#p-net').textContent=net;
+    $('#p-net').textContent = mode==='secure' ? net : net+' · insecure';
     $('#dot').className='dot'+(relay?' relay':'');
     if(inb){
       const now=performance.now(),dt=(now-prev.t)/1000||1;

@@ -27,9 +27,11 @@ type ICEServer struct {
 	Credential string   `json:"credential,omitempty"`
 }
 
-// Config is what GET /config returns.
+// Config is what GET /config returns. Mode is "secure" (signaling over TLS)
+// or "insecure" (plain HTTP) so clients can show which posture they are in.
 type Config struct {
 	ICEServers []ICEServer `json:"iceServers"`
+	Mode       string      `json:"mode,omitempty"`
 }
 
 // InputEvent is one message on the "input" data channel. JSON for the spike;

@@ -101,16 +101,24 @@ NC_PASSWORD=change-me NC_PIN=<pin> ./bin/nc-probe -rendezvous https://nc.example
 
 Two layers, both simple on purpose:
 
-1. **Rendezvous password.** HTTP Basic auth on everything the rendezvous serves, the
-   WebSocket included. Set it with `-password` or `NC_PASSWORD`; if unset a random one is
-   generated and printed at startup. The username defaults to `nc` (`-user`, `NC_USER`).
+1. **Rendezvous password, exchanged once for a token.** The page itself is public, so
+   no browser login dialog ever appears. A client `POST`s its username and password to
+   `/auth` once and gets a 12-hour token, then uses `Authorization: Bearer <token>` on
+   `/config` and `/hosts`, and `?token=<token>` on the WebSocket (browsers cannot set
+   WebSocket headers). Its own connect form is the only place credentials are typed.
+   Headless clients (`nc-host`, `nc-probe`) may still use HTTP Basic instead. Set the
+   password with `-password` or `NC_PASSWORD`; if unset a random one is generated and
+   printed at startup. The username defaults to `nc` (`-user`, `NC_USER`).
 2. **Host PIN.** Each host has a 6-digit PIN (`-pin` or `NC_PIN`, generated if unset). A
    client must send it with its connection offer or the host refuses. So two people sharing
    one rendezvous cannot drive each other's machines.
 
-Media is encrypted by WebRTC (DTLS-SRTP). The rendezvous sees signaling and, for relayed
-sessions, encrypted packets. TURN credentials are still static in this spike; per-session
-credentials and key-based pairing are on the plan.
+Media is encrypted by WebRTC (DTLS-SRTP) whether or not the rendezvous uses TLS. Over
+plain HTTP the *signaling* (credentials, PIN, SDP) is in the clear, which is fine on a
+trusted LAN and not for the open internet — run with `-acme-domain` or `-tls-cert` there.
+`/config` reports `mode` as `secure` or `insecure` so clients can show which they are in.
+TURN credentials are still static; per-session credentials and key-based pairing are on
+the plan. See [docs/SECURITY.md](docs/SECURITY.md).
 
 ## Host options worth knowing
 

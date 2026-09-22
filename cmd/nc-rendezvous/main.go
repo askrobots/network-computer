@@ -4,7 +4,9 @@ package main
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"crypto/tls"
 	"embed"
@@ -12,11 +14,13 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -235,21 +239,56 @@ func main() {
 		}
 	}
 
+	auth := newAuthority(*authUser, *authPass)
+	// secure mode = signaling is over TLS; clients show which they are in.
+	cfg.Mode = "insecure"
+	if *acmeDomain != "" || *certFile != "" {
+		cfg.Mode = "secure"
+	}
+
 	sub, _ := fs.Sub(webFS, "web")
 	mux := http.NewServeMux()
-	mux.HandleFunc("/ws", h.serveWS)
-	mux.HandleFunc("/config", func(w http.ResponseWriter, r *http.Request) {
+
+	// POST /auth {user,password} -> {token}. The only place credentials go.
+	mux.HandleFunc("/auth", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Headers", "content-type,authorization")
+		if r.Method == http.MethodOptions {
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST only", http.StatusMethodNotAllowed)
+			return
+		}
+		var body struct{ User, Password string }
+		json.NewDecoder(io.LimitReader(r.Body, 4<<10)).Decode(&body)
+		if !auth.checkCreds(body.User, body.Password) {
+			http.Error(w, `{"error":"bad credentials"}`, http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"token":     auth.mint(),
+			"expiresIn": int(tokenTTL.Seconds()),
+			"mode":      cfg.Mode,
+		})
+	})
+
+	mux.Handle("/ws", auth.guard(http.HandlerFunc(h.serveWS)))
+	mux.Handle("/config", auth.guard(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		json.NewEncoder(w).Encode(cfg)
-	})
-	mux.HandleFunc("/hosts", func(w http.ResponseWriter, r *http.Request) {
+	})))
+	mux.Handle("/hosts", auth.guard(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
 		json.NewEncoder(w).Encode(h.hostNames())
-	})
+	})))
+	// the page itself is public: no browser login dialog, the app's form asks once
 	mux.Handle("/", http.FileServer(http.FS(sub)))
 
-	srv := &http.Server{Addr: *httpAddr, Handler: basicAuth(*authUser, *authPass, mux), ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{Addr: *httpAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 
 	switch {
 	case *acmeDomain != "":
@@ -272,14 +311,81 @@ func main() {
 	}
 }
 
-// basicAuth guards everything, the WebSocket included. Browsers send the cached
-// credentials on the same-origin WebSocket handshake, so one prompt covers all.
-func basicAuth(user, pass string, next http.Handler) http.Handler {
+// authority authenticates callers. It deliberately never sends a
+// WWW-Authenticate header, so a browser shows no native login dialog: the
+// client's own form is the single place credentials are entered. Three ways in:
+// a Bearer token from POST /auth, HTTP Basic (for headless nc-host/nc-probe),
+// or ?token= on the WebSocket, which browsers cannot give headers to.
+type authority struct {
+	user, pass string
+	secret     []byte
+}
+
+const tokenTTL = 12 * time.Hour
+
+func newAuthority(user, pass string) *authority {
+	secret := make([]byte, 32)
+	rand.Read(secret)
+	return &authority{user: user, pass: pass, secret: secret}
+}
+
+func (a *authority) checkCreds(u, p string) bool {
+	return subtle.ConstantTimeCompare([]byte(u), []byte(a.user)) == 1 &&
+		subtle.ConstantTimeCompare([]byte(p), []byte(a.pass)) == 1
+}
+
+func (a *authority) sign(payload []byte) string {
+	m := hmac.New(sha256.New, a.secret)
+	m.Write(payload)
+	return base64.RawURLEncoding.EncodeToString(m.Sum(nil))
+}
+
+func (a *authority) mint() string {
+	payload := []byte(fmt.Sprintf("%s|%d", a.user, time.Now().Add(tokenTTL).Unix()))
+	return base64.RawURLEncoding.EncodeToString(payload) + "." + a.sign(payload)
+}
+
+func (a *authority) validToken(tok string) bool {
+	dot := strings.LastIndex(tok, ".")
+	if dot < 0 {
+		return false
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(tok[:dot])
+	if err != nil {
+		return false
+	}
+	if subtle.ConstantTimeCompare([]byte(a.sign(payload)), []byte(tok[dot+1:])) != 1 {
+		return false
+	}
+	i := strings.LastIndex(string(payload), "|")
+	if i < 0 {
+		return false
+	}
+	exp, err := strconv.ParseInt(string(payload)[i+1:], 10, 64)
+	return err == nil && time.Now().Unix() <= exp
+}
+
+func (a *authority) ok(r *http.Request) bool {
+	if h := r.Header.Get("Authorization"); h != "" {
+		if strings.HasPrefix(h, "Bearer ") {
+			return a.validToken(strings.TrimPrefix(h, "Bearer "))
+		}
+		if u, p, isBasic := r.BasicAuth(); isBasic {
+			return a.checkCreds(u, p)
+		}
+	}
+	if t := r.URL.Query().Get("token"); t != "" {
+		return a.validToken(t)
+	}
+	return false
+}
+
+// guard protects a handler. 401 with no WWW-Authenticate: no browser dialog.
+func (a *authority) guard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		u, p, ok := r.BasicAuth()
-		if !ok || subtle.ConstantTimeCompare([]byte(u), []byte(user)) != 1 || subtle.ConstantTimeCompare([]byte(p), []byte(pass)) != 1 {
-			w.Header().Set("WWW-Authenticate", `Basic realm="nc-rendezvous"`)
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		if !a.ok(r) {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 			return
 		}
 		next.ServeHTTP(w, r)
