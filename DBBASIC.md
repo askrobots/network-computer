@@ -46,6 +46,27 @@ dbbasic:
       alt: A Linux desktop streamed to a browser over WebRTC, browsing its own repo
       role: hero                      # hero | screenshot | icon
 
+  # Optional: how to build and test this project on Linux/Windows (used by a
+  # build box + scripts/build-linux.sh; falls back to per-type defaults).
+  build:
+    linux: null                       # e.g. "flutter build linux --release"
+    windows: null                     # e.g. "flutter build windows --release"
+    macos: null
+  test:
+    linux: null                       # e.g. "xvfb-run -a flutter test"
+
+  # Optional: built artifacts to publish as downloads on dbbasic.com. A build sweep
+  # fills these in (path relative to this file, or a URL once uploaded). The
+  # dbbasic.com agent uploads/links them per platform.
+  downloads:
+    # - platform: macos                # macos | linux | windows | android | ios
+    #   version: 0.1.0
+    #   path: build/macos/Build/Products/Release/App.app   # or a .dmg/.zip
+    # - platform: linux
+    #   path: build/linux/x64/release/bundle
+    # - platform: windows
+    #   path: build/windows/x64/runner/Release
+
   # Optional: a markdown file whose body is the published page content. If absent,
   # the body of this DBBASIC.md (below the frontmatter) is used.
   content_file: null
