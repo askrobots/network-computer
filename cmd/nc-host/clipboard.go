@@ -25,7 +25,8 @@ import (
 //   - desk to client: the desk clipboard is watched while a client is
 //     connected and new text is sent the same way. {"t":"clipget"} (the client
 //     just pressed copy) watches closely for a second and answers
-//     {"t":"clipnone"} if nothing new was copied.
+//     {"t":"clipnone"} if nothing new was copied. {"t":"clipnow"} (a button)
+//     asks for whatever the desk clipboard holds, new or not.
 const (
 	clipPiece = 8 << 10 // bytes of text per message, well under SCTP limits even when JSON-escaped
 	clipMax   = 4 << 20
@@ -39,6 +40,7 @@ type clipSync struct {
 	last  string // what the desk clipboard holds as far as both sides know
 	known bool   // last has been set, by the first look or by the client
 	dc    *webrtc.DataChannel
+	out   sync.Mutex // one text's pieces at a time
 	in    strings.Builder
 	poke  chan struct{}
 }
@@ -75,6 +77,20 @@ func (c *clipSync) get() {
 	case c.poke <- struct{}{}:
 	default:
 	}
+}
+
+// now sends the desk clipboard as it is, for the client's "get" button.
+func (c *clipSync) now() {
+	t, err := clipRead()
+	if err != nil || t == "" || len(t) > clipMax {
+		c.sendEvent(proto.InputEvent{T: "clipnone"})
+		return
+	}
+	c.mu.Lock()
+	c.last = t
+	c.mu.Unlock()
+	log.Printf("clipboard: client asked, sent %d bytes", len(t))
+	c.send(t)
 }
 
 func (c *clipSync) run(ctx context.Context) {
@@ -122,6 +138,8 @@ func (c *clipSync) run(ctx context.Context) {
 }
 
 func (c *clipSync) send(text string) {
+	c.out.Lock()
+	defer c.out.Unlock()
 	for {
 		n := len(text)
 		if n > clipPiece {

@@ -187,6 +187,8 @@
     <button class="bar-btn" id="b-mic" title="Microphone">🎤</button>
     <button class="bar-btn" id="b-graphs" title="Graphs">📈</button>
     <button class="bar-btn" id="b-stats" title="Stats">📊</button>
+    <button class="bar-btn" id="b-clipup" title="Send this device's clipboard to the desk">📋↑</button>
+    <button class="bar-btn" id="b-clipdown" title="Copy the desk's clipboard to this device">📋↓</button>
     <button class="bar-btn" id="b-keys" title="Keyboard">⌨️</button>
     <button class="bar-btn" id="b-full" title="Fullscreen">⛶</button>
     <button class="bar-btn" id="b-quit" title="Disconnect">✕</button>
@@ -667,7 +669,7 @@ function cmdIsCtrl(){ return IS_MAC&&$('#d-cmd').checked; }
 // Copies made other ways (menus) arrive on their own and are written right
 // away, or at the next key press or click where the browser insists on one.
 const clipBox=$('#clipbox');
-let clipIn='', clipPending=null, copyWaiter=null, pasteArmed=false, pasteTimer=0;
+let clipAsked=false, clipIn='', clipPending=null, copyWaiter=null, pasteArmed=false, pasteTimer=0;
 function ctlOpen(){ return ctl&&ctl.readyState==='open'; }
 function sendClip(text){
   let i=0;
@@ -692,8 +694,8 @@ function finishPaste(text){
   ctl.send(JSON.stringify({t:'kd',code:'KeyV'})); ctl.send(JSON.stringify({t:'ku',code:'KeyV'}));
 }
 clipBox.addEventListener('paste',e=>{ e.preventDefault(); finishPaste(e.clipboardData.getData('text/plain')); });
-function startCopy(){
-  ctl.send(JSON.stringify({t:'clipget'}));
+function startCopy(ask='clipget'){
+  ctl.send(JSON.stringify({t:ask}));
   if(!window.ClipboardItem||!navigator.clipboard||!navigator.clipboard.write) return;
   if(copyWaiter) copyWaiter.rej(new Error('superseded'));
   const w={}; const p=new Promise((res,rej)=>{ w.res=res; w.rej=rej; });
@@ -705,11 +707,12 @@ function onCtl(ev){
   let m; try{ m=JSON.parse(ev.data); }catch(e){ return; }
   if(m.t==='clip'){
     clipIn+=m.text||''; if(m.more) return;
-    const t=clipIn; clipIn='';
+    const t=clipIn; clipIn=''; clipAsked=false;
     if(copyWaiter){ copyWaiter.res(new Blob([t],{type:'text/plain'})); copyWaiter=null; return; }
     clipPending=t; flushClip();
   }else if(m.t==='clipnone'){
     if(copyWaiter){ copyWaiter.rej(new Error('nothing copied')); copyWaiter=null; }
+    if(clipAsked){ clipAsked=false; toast("The desk's clipboard has no text"); }
   }
 }
 function flushClip(){
@@ -727,6 +730,16 @@ async function pasteButton(){
   toast(text ? 'Pasted from this device' : "Pasted the desk's clipboard (no text here to send)");
   for(const [t,code] of [['kd','ControlLeft'],['kd','KeyV'],['ku','KeyV'],['ku','ControlLeft']]) ctl.send(JSON.stringify({t,code}));
 }
+// Toolbar buttons: move the clipboard without a keystroke, so the desk's own
+// menus (right-click → Paste) and this device's apps see it.
+$('#b-clipup').onclick=async()=>{
+  let text='';
+  try{ text=await navigator.clipboard.readText(); }catch(e){}
+  if(!ctlOpen()) return;
+  if(!text){ toast('No text on this clipboard (or the browser said no)'); return; }
+  sendClip(text); toast('Clipboard sent to the desk');
+};
+$('#b-clipdown').onclick=()=>{ if(!ctlOpen()) return; clipAsked=true; startCopy('clipnow'); };
 function isShortcut(e,code,...codes){ return codes.includes(code)&&(e.ctrlKey||(e.metaKey&&cmdIsCtrl()))&&!e.altKey; }
 
 /* ---------- fullscreen ---------- */

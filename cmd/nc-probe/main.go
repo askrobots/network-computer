@@ -42,7 +42,7 @@ func main() {
 	sendInput := flag.Bool("input", false, "send a few test input events over the data channel")
 	keyboard := flag.String("keyboard", "", "tell the host this client's keyboard layout over the control channel, e.g. us:dvorak")
 	display := flag.String("display", "", "ask the host for a screen size and scale over the control channel, e.g. 1600x900@1.5")
-	clip := flag.String("clip", "", "put this text (or @file's contents) on the host clipboard, then log what the host sends back; \"-\" only watches")
+	clip := flag.String("clip", "", "put this text (or @file's contents) on the host clipboard, then log what the host sends back; \"-\" only watches, \"?\" asks for the host clipboard as it is")
 	micTone := flag.Int("mic-tone", 0, "send a sine tone of this frequency (Hz) as the probe's microphone, to test mic passthrough")
 	flag.Parse()
 
@@ -401,8 +401,12 @@ func watchClipboard(pc *webrtc.PeerConnection, arg string) {
 		}
 		text = string(b)
 	}
-	if arg == "-" {
+	ask := "clipget"
+	switch arg {
+	case "-":
 		text = ""
+	case "?":
+		text, ask = "", "clipnow"
 	}
 	ctl, _ := pc.CreateDataChannel("control", nil)
 	send := func(ev proto.InputEvent) { b, _ := json.Marshal(ev); ctl.Send(b) }
@@ -422,7 +426,7 @@ func watchClipboard(pc *webrtc.PeerConnection, arg string) {
 			}
 			log.Printf("clipboard: sent %d bytes to the host", len(text))
 		}
-		send(proto.InputEvent{T: "clipget"})
+		send(proto.InputEvent{T: ask})
 	})
 	var in strings.Builder
 	ctl.OnMessage(func(m webrtc.DataChannelMessage) {
