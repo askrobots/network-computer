@@ -29,22 +29,7 @@ case "$1" in
   logs)   ssh root@"$(ip)" journalctl -f -u nc-host -u nc-rendezvous ;;
   update) ssh root@"$(ip)" 'cd /opt/network-computer && git pull -q && export PATH=$PATH:/usr/local/go/bin && go build -o /usr/local/bin/ ./cmd/... && systemctl restart nc-rendezvous nc-host && echo updated' ;;
   provision) IP=$(ip); ssh root@"$IP" 'mkdir -p /root/provision'; scp -q -r "$ROOT/provision/." root@"$IP":/root/provision/; ssh root@"$IP" "NC_PUBLIC_IP=$IP NC_HOST_NAME=$NAME NC_DOMAIN=$NC_DOMAIN sh /root/provision/apply.sh" ;;
-  dns)
-    FQDN=${2:?usage: droplet.sh dns <name.domain>}; IP=$(ip)
-    # longest DigitalOcean zone that is a suffix of the name
-    ZONE=$(doctl compute domain list --format Domain --no-header | awk -v f="$FQDN" '
-      { z=$1; n=length(z)
-        if (length(f) > n && substr(f, length(f)-n) == "." z && n > best) { best=n; zone=z } }
-      END { print zone }')
-    [ -n "$ZONE" ] || { echo "no DigitalOcean DNS zone for $FQDN"; exit 1; }
-    REC=${FQDN%."$ZONE"}
-    ID=$(doctl compute domain records list "$ZONE" --format ID,Type,Name --no-header | awk -v n="$REC" '$2=="A" && $3==n{print $1; exit}')
-    if [ -n "$ID" ]; then
-      doctl compute domain records update "$ZONE" --record-id "$ID" --record-data "$IP" --record-ttl 60 >/dev/null
-    else
-      doctl compute domain records create "$ZONE" --record-type A --record-name "$REC" --record-data "$IP" --record-ttl 60 >/dev/null
-    fi
-    echo "$FQDN -> $IP (A record in $ZONE, ttl 60)" ;;
+  dns)  sh ./dns-point.sh "${2:?usage: droplet.sh dns <name.domain>}" "$(ip)" ;;
   off)    doctl compute droplet-action power-off "$(id)" --wait >/dev/null && echo "$NAME powered off (still billed; destroy to stop billing)" ;;
   on)     doctl compute droplet-action power-on "$(id)" --wait >/dev/null && echo "$NAME powered on at $(ip)" ;;
   destroy) doctl compute droplet delete "$(id)" --force && echo "$NAME destroyed" ;;

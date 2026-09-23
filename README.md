@@ -74,28 +74,39 @@ NC_PASSWORD=change-me NC_PIN=<pin> ./bin/nc-probe -rendezvous http://127.0.0.1:8
 
 ## Across the internet
 
-Put `nc-rendezvous` (and, for a cloud desktop, `nc-host`) on any machine with a
-public IP. `infra/` scripts this for DigitalOcean (tested), Vultr, Linode and AWS,
-or provision any Ubuntu box you already have with `infra/provision-host.sh <ip>`.
-See [infra/README.md](infra/README.md). The rest of this section is the manual path.
-
-Put `nc-rendezvous` on any machine with a public IP. Open TCP 8765 (or 443 with TLS) and
-UDP 3478, plus UDP 49152 to 65535 for relayed sessions.
+**Recommended: give it a domain.** With a host name whose DNS is on DigitalOcean, one
+command builds the server, points the name at it, and brings it up with a real Let's
+Encrypt certificate:
 
 ```sh
-# on the VPS
+NC_DOMAIN=nc.example.com infra/create-droplet.sh
+# ... done. rendezvous: https://nc.example.com
+```
+
+Everyone then opens `https://nc.example.com`: no fingerprints, no certificate warnings,
+and the microphone works in browsers, which only allow it on HTTPS pages. Rebuilds get a
+new IP; the scripts move the DNS record with it. Why and how: [docs/DOMAIN.md](docs/DOMAIN.md).
+
+`infra/` also scripts Vultr, Linode and AWS, or provisions any Ubuntu box you already
+have with `infra/provision-host.sh <ip>`. See [infra/README.md](infra/README.md).
+
+### Manual path
+
+Open TCP 443 and 80 (or 8765 without TLS), UDP 3478, and UDP 49152 to 65535 for
+relayed sessions.
+
+```sh
+# on the VPS, with a domain whose A record points here (certificate fetched automatically):
+NC_PASSWORD=change-me ./bin/nc-rendezvous -turn :3478 -public-ip 203.0.113.5 \
+  -acme-domain nc.example.com -local 127.0.0.1:8765
+
+# no domain: plain HTTP (trusted LAN only; browsers will not allow the microphone)
 NC_PASSWORD=change-me ./bin/nc-rendezvous -http :8765 -turn :3478 -public-ip 203.0.113.5
 
-# with a Let's Encrypt certificate instead (listens on 443 and 80):
-NC_PASSWORD=change-me ./bin/nc-rendezvous -turn :3478 -public-ip 203.0.113.5 -acme-domain nc.example.com
-
-# no domain? secure mode makes a self-signed cert (kept in -state-dir, so it is
-# stable across restarts) and prints its SHA-256 fingerprint for clients to pin:
+# no domain but over the internet: self-signed, and clients pin its fingerprint
 NC_PASSWORD=change-me ./bin/nc-rendezvous -http :8765 -turn :3478 -public-ip 203.0.113.5 -mode secure
-#   ... secure mode: HTTPS on :8765
 #   ...   sha256 6381268cf1b96418c9c3...
-# then give nc-host / nc-probe that fingerprint:
-NC_TLS_FP=6381268c... NC_PASSWORD=change-me ./bin/nc-host -rendezvous https://nc.example.com:8765 -name mybox
+NC_TLS_FP=6381268c... NC_PASSWORD=change-me ./bin/nc-host -rendezvous https://203.0.113.5:8765 -name mybox
 
 # on the desktop behind NAT
 NC_PASSWORD=change-me ./bin/nc-host -rendezvous https://nc.example.com -name mybox

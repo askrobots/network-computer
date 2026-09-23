@@ -3,7 +3,10 @@
 # Copies provision/ and runs apply.sh. This is the provider-agnostic core that
 # every create-*.sh script calls once its instance is up.
 #
-#   infra/provision-host.sh <ip> [host-name] [ssh-user]
+#   [NC_DOMAIN=nc.example.com] infra/provision-host.sh <ip> [host-name] [ssh-user]
+#
+# NC_DOMAIN turns on a Let's Encrypt certificate; its A record must already
+# point at <ip> (infra/dns-point.sh does that for DigitalOcean DNS).
 set -e
 IP=$1; NAME=${2:-cloudbox}; USER=${3:-root}
 [ -n "$IP" ] || { echo "usage: provision-host.sh <ip> [host-name] [ssh-user]"; exit 1; }
@@ -20,6 +23,7 @@ ssh "$USER@$IP" 'mkdir -p /root/provision'
 scp -q -r "$ROOT/provision/." "$USER@$IP":/root/provision/
 # sudo only if not already root
 PFX=""; [ "$USER" = root ] || PFX="sudo "
-ssh "$USER@$IP" "NC_PUBLIC_IP=$IP NC_HOST_NAME=$NAME ${PFX}sh /root/provision/apply.sh"
+ssh "$USER@$IP" "NC_PUBLIC_IP=$IP NC_HOST_NAME=$NAME NC_DOMAIN=$NC_DOMAIN ${PFX}sh /root/provision/apply.sh"
 echo
-echo "done. rendezvous: http://$IP:8765   secrets: ssh $USER@$IP ${PFX}cat /etc/nc/env"
+if [ -n "$NC_DOMAIN" ]; then URL="https://$NC_DOMAIN"; else URL="http://$IP:8765"; fi
+echo "done. rendezvous: $URL   secrets: ssh $USER@$IP ${PFX}cat /etc/nc/env"

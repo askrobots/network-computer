@@ -25,6 +25,10 @@ Make the posture a deliberate choice the client shows, not an accident.
 - Appropriate when host, rendezvous and client are on a network you trust.
 
 ### Secure mode (internet) — one of two ways to get TLS
+
+**Prefer the domain.** It is the only option under which browsers (Safari especially)
+reliably grant the microphone, and it needs no fingerprints. With the domain's DNS on
+DigitalOcean it is one command; see [DOMAIN.md](DOMAIN.md).
 1. **With a domain (best):** `nc-rendezvous -acme-domain nc.example.com` already
    gets a real Let's Encrypt cert. Clients use `https`/`wss`, no warnings, full
    integrity. This path exists today.

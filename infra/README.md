@@ -22,6 +22,19 @@ bare metal or a machine you already have:
 infra/provision-host.sh <ip> [host-name] [ssh-user]
 ```
 
+## Recommended: a domain on DigitalOcean DNS
+
+```sh
+NC_DOMAIN=nc.example.com infra/create-droplet.sh     # droplet + DNS + Let's Encrypt, one command
+infra/droplet.sh dns nc.example.com                  # re-point the name at the current droplet
+NC_DOMAIN=nc.example.com infra/droplet.sh provision  # turn HTTPS on for an existing box
+```
+
+A rebuilt droplet gets a new IP; with the domain's DNS on DigitalOcean the scripts move
+the A record (ttl 60) themselves, so the address you hand out never changes and the
+certificate is always real. `dns-point.sh` is the building block. Full reasoning and the
+one-time setup: [../docs/DOMAIN.md](../docs/DOMAIN.md).
+
 ## Providers
 
 Only DigitalOcean has been tested end to end. The others are written the same
@@ -68,7 +81,7 @@ Dallas Local Zone is `us-east-1-dfw-1` if Houston is unavailable.
 ## DigitalOcean day-to-day
 
 ```
-infra/droplet.sh status | ssh | creds | logs | update | provision | off | on | destroy
+infra/droplet.sh status | ssh | creds | logs | update | provision | dns <name> | off | on | destroy
 ```
 
 `update` pulls and rebuilds the binaries; `provision` re-copies `../provision/`
