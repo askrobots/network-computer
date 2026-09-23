@@ -39,6 +39,10 @@ func audioArgs(device string) []string {
 		"-frame_duration", "20", "-page_duration", "20000", "-flush_packets", "1", "-f", "opus", "pipe:1")
 }
 
+// audioLead is how far ahead of sending audio is scheduled: it absorbs late
+// capture at the cost of that much extra audio delay.
+const audioLead = 40 * time.Millisecond
+
 func streamAudio(ctx context.Context, device string, track sampleWriter) {
 	for ctx.Err() == nil {
 		args := audioArgs(device)
@@ -71,13 +75,16 @@ func streamAudio(ctx context.Context, device string, track sampleWriter) {
 			if d <= 0 || d > 120*time.Millisecond {
 				d = 20 * time.Millisecond
 			}
+			// A small fixed lead: each packet is due audioLead after capture, so
+			// one that ffmpeg hands over up to audioLead late still leaves on
+			// time instead of bunching up with the next.
 			if start.IsZero() {
-				start = time.Now()
+				start = time.Now().Add(audioLead)
 			}
 			if wait := time.Until(start.Add(sent)); wait > 0 {
 				time.Sleep(wait)
 			} else if -wait > 200*time.Millisecond {
-				start, sent = time.Now(), 0 // fell far behind: resync rather than burst to catch up
+				start, sent = time.Now().Add(audioLead), 0 // fell far behind: resync rather than burst to catch up
 			}
 			if err := track.WriteSample(media.Sample{Data: pkt, Duration: d}); err != nil {
 				log.Printf("audio write: %v", err)
