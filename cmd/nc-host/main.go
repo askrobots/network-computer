@@ -349,6 +349,9 @@ func (h *host) handleOffer(ctx context.Context, m proto.Message) {
 				}()
 				return
 			}
+			if (ev.T == "md" || ev.T == "mu") && ev.At {
+				inj.Handle(proto.InputEvent{T: "mm", X: ev.X, Y: ev.Y}) // click where it was pressed
+			}
 			inj.Handle(ev)
 		})
 	})
@@ -368,6 +371,9 @@ func (h *host) handleOffer(ctx context.Context, m proto.Message) {
 		switch st {
 		case webrtc.PeerConnectionStateConnected:
 			go logSelectedPair(peer, pc)
+			for _, c := range vsender.GetParameters().Codecs { // what the client agreed to decode
+				log.Printf("[%s] video codec: %s %s (pt %d)", peer, c.MimeType, c.SDPFmtpLine, c.PayloadType)
+			}
 			go func() {
 				opts := h.capture
 				if last := h.display.current(); last.W > 0 {
