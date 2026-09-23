@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/coder/websocket"
 	"github.com/pion/rtp"
@@ -41,6 +42,7 @@ func main() {
 	sendInput := flag.Bool("input", false, "send a few test input events over the data channel")
 	keyboard := flag.String("keyboard", "", "tell the host this client's keyboard layout over the control channel, e.g. us:dvorak")
 	display := flag.String("display", "", "ask the host for a screen size and scale over the control channel, e.g. 1600x900@1.5")
+	clip := flag.String("clip", "", "put this text (or @file's contents) on the host clipboard, then log what the host sends back; \"-\" only watches")
 	micTone := flag.Int("mic-tone", 0, "send a sine tone of this frequency (Hz) as the probe's microphone, to test mic passthrough")
 	flag.Parse()
 
@@ -138,6 +140,10 @@ func main() {
 			ctl.Send(b)
 			log.Printf("asked for screen %dx%d at %.0f%%", w, hgt, scale*100)
 		})
+	}
+
+	if *clip != "" {
+		watchClipboard(pc, *clip)
 	}
 
 	connected := make(chan struct{})
@@ -381,4 +387,64 @@ func sendTone(ctx context.Context, track *webrtc.TrackLocalStaticSample, hz int)
 			return
 		}
 	}
+}
+
+// watchClipboard exercises clipboard sync on its own control channel: it sends
+// text the way the web client pastes (in pieces), asks for the host's clipboard
+// the way a copy key does, and logs every clipboard the host sends.
+func watchClipboard(pc *webrtc.PeerConnection, arg string) {
+	text := arg
+	if strings.HasPrefix(arg, "@") {
+		b, err := os.ReadFile(arg[1:])
+		if err != nil {
+			log.Fatalf("-clip: %v", err)
+		}
+		text = string(b)
+	}
+	if arg == "-" {
+		text = ""
+	}
+	ctl, _ := pc.CreateDataChannel("control", nil)
+	send := func(ev proto.InputEvent) { b, _ := json.Marshal(ev); ctl.Send(b) }
+	ctl.OnOpen(func() {
+		if text != "" {
+			rest := text
+			for rest != "" {
+				n := len(rest)
+				if n > 8192 {
+					n = 8192
+					for n > 0 && !utf8.RuneStart(rest[n]) {
+						n--
+					}
+				}
+				send(proto.InputEvent{T: "clip", Text: rest[:n], More: n < len(rest)})
+				rest = rest[n:]
+			}
+			log.Printf("clipboard: sent %d bytes to the host", len(text))
+		}
+		send(proto.InputEvent{T: "clipget"})
+	})
+	var in strings.Builder
+	ctl.OnMessage(func(m webrtc.DataChannelMessage) {
+		var ev proto.InputEvent
+		if json.Unmarshal(m.Data, &ev) != nil {
+			return
+		}
+		switch ev.T {
+		case "clipnone":
+			log.Printf("clipboard: host reports nothing new copied")
+		case "clip":
+			in.WriteString(ev.Text)
+			if ev.More {
+				return
+			}
+			t := in.String()
+			in.Reset()
+			preview := t
+			if len(preview) > 60 {
+				preview = preview[:60] + "..."
+			}
+			log.Printf("clipboard: host sent %d bytes: %q", len(t), preview)
+		}
+	})
 }

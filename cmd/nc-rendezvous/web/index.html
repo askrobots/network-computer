@@ -134,6 +134,8 @@
   .spin{width:34px;height:34px;border:3px solid var(--line);border-top-color:var(--accent);
     border-radius:50%;animation:spin 1s linear infinite}
   @keyframes spin{to{transform:rotate(360deg)}}
+  #disppanel label{display:flex;align-items:center;gap:4px;white-space:nowrap}
+  #clipbox{position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0}
 </style>
 
 <!-- ================= CONNECT ================= -->
@@ -197,7 +199,9 @@
     <select id="d-scale" title="Text and UI scale"></select>
     <span>⌨️</span>
     <select id="d-kbd" title="The layout of the keyboard on this device"></select>
+    <label id="d-cmdl" title="⌘C, ⌘V, ⌘Z… work as Ctrl shortcuts on the desk" hidden><input type="checkbox" id="d-cmd"> ⌘ = Ctrl</label>
   </div>
+  <textarea id="clipbox" aria-hidden="true" tabindex="-1"></textarea>
   <div id="micpanel">
     <span>🎤</span>
     <select id="mic-dev" title="Microphone"></select>
@@ -355,6 +359,7 @@ async function openPeer(){
   dc=pc.createDataChannel('input',{ordered:false,maxRetransmits:0});
   // reliable + ordered: requests that must not be dropped (screen size, later files and clipboard)
   ctl=pc.createDataChannel('control');
+  ctl.onmessage=onCtl;
   ctl.onopen=()=>{ lastDisplay=null; sendDisplay(); sendKeyboard(false); };
 
   pc.ontrack=ev=>{
@@ -646,6 +651,72 @@ function sendKeyboard(announce){
   if(announce) toast('Keyboard: '+$('#d-kbd').selectedOptions[0].textContent);
 }
 $('#d-kbd').onchange=()=>{ store.set('kbd',$('#d-kbd').value); sendKeyboard(true); };
+// On a Mac, ⌘ acts as Ctrl on the desk, so ⌘C/⌘V/⌘Z do what the fingers expect.
+const IS_MAC=/Mac|iPhone|iPad/.test(navigator.platform||navigator.userAgent);
+$('#d-cmdl').hidden=!IS_MAC;
+$('#d-cmd').checked=store.get('cmd','ctrl')==='ctrl';
+$('#d-cmd').onchange=()=>store.set('cmd',$('#d-cmd').checked?'ctrl':'super');
+function cmdIsCtrl(){ return IS_MAC&&$('#d-cmd').checked; }
+
+/* ---------- clipboard (text) ---------- */
+// Paste: Ctrl/⌘+V focuses a hidden box so the browser pastes this device's
+// clipboard into it (no permission prompt); the text goes to the desk, then
+// the V keystroke, both on the ordered control channel.
+// Copy: Ctrl/⌘+C or X hands the browser a clipboard write that completes when
+// the desk reports the new text (allowed because it starts in the key press).
+// Copies made other ways (menus) arrive on their own and are written right
+// away, or at the next key press or click where the browser insists on one.
+const clipBox=$('#clipbox');
+let clipIn='', clipPending=null, copyWaiter=null, pasteArmed=false, pasteTimer=0;
+function ctlOpen(){ return ctl&&ctl.readyState==='open'; }
+function sendClip(text){
+  let i=0;
+  while(i<text.length){
+    let n=Math.min(4096,text.length-i);
+    const c=text.charCodeAt(i+n-1);
+    if(n>1&&c>=0xD800&&c<=0xDBFF&&i+n<text.length) n--;   // keep surrogate pairs together
+    const piece=text.slice(i,i+n); i+=n;
+    ctl.send(JSON.stringify({t:'clip',text:piece,more:i<text.length}));
+  }
+}
+function startPaste(){
+  pasteArmed=true; clipBox.value=''; clipBox.focus();
+  clearTimeout(pasteTimer); pasteTimer=setTimeout(()=>finishPaste(''),400); // no paste event: no text here
+}
+function finishPaste(text){
+  if(!pasteArmed) return;
+  pasteArmed=false; clearTimeout(pasteTimer); clipBox.blur();
+  if(!ctlOpen()) return;
+  if(text) sendClip(text);
+  ctl.send(JSON.stringify({t:'kd',code:'KeyV'})); ctl.send(JSON.stringify({t:'ku',code:'KeyV'}));
+}
+clipBox.addEventListener('paste',e=>{ e.preventDefault(); finishPaste(e.clipboardData.getData('text/plain')); });
+function startCopy(){
+  ctl.send(JSON.stringify({t:'clipget'}));
+  if(!window.ClipboardItem||!navigator.clipboard||!navigator.clipboard.write) return;
+  if(copyWaiter) copyWaiter.rej(new Error('superseded'));
+  const w={}; const p=new Promise((res,rej)=>{ w.res=res; w.rej=rej; });
+  copyWaiter=w;
+  setTimeout(()=>{ if(copyWaiter===w){ copyWaiter=null; w.rej(new Error('timeout')); } },3000);
+  navigator.clipboard.write([new ClipboardItem({'text/plain':p})]).then(()=>toast('Copied to this device')).catch(()=>{});
+}
+function onCtl(ev){
+  let m; try{ m=JSON.parse(ev.data); }catch(e){ return; }
+  if(m.t==='clip'){
+    clipIn+=m.text||''; if(m.more) return;
+    const t=clipIn; clipIn='';
+    if(copyWaiter){ copyWaiter.res(new Blob([t],{type:'text/plain'})); copyWaiter=null; return; }
+    clipPending=t; flushClip();
+  }else if(m.t==='clipnone'){
+    if(copyWaiter){ copyWaiter.rej(new Error('nothing copied')); copyWaiter=null; }
+  }
+}
+function flushClip(){
+  if(clipPending===null||!navigator.clipboard) return;
+  const t=clipPending;
+  navigator.clipboard.writeText(t).then(()=>{ if(clipPending===t) clipPending=null; toast('Copied to this device'); }).catch(()=>{});
+}
+function isShortcut(e,code,...codes){ return codes.includes(code)&&(e.ctrlKey||(e.metaKey&&cmdIsCtrl()))&&!e.altKey; }
 
 /* ---------- fullscreen ---------- */
 $('#b-full').onclick=()=>{
@@ -696,6 +767,7 @@ stage.addEventListener('mousemove',e=>{
 });
 (function flush(){ if(pending){send(pending);pending=null;} requestAnimationFrame(flush); })();
 stage.addEventListener('mousedown',e=>{
+  flushClip();
   if(!grabbing){setGrab(true);return;}
   e.preventDefault(); send({t:'md',b:e.button});
 });
@@ -715,20 +787,34 @@ Object.assign(US_CODE,{'!':'Digit1','@':'Digit2','#':'Digit3','$':'Digit4','%':'
   '/':'Slash','?':'Slash',' ':'Space'});
 const downAs={};   // physical key -> code sent on keydown, so the keyup always matches
 function codeFor(e){
+  if(cmdIsCtrl()&&(e.code==='MetaLeft'||e.code==='MetaRight')) return e.code==='MetaLeft'?'ControlLeft':'ControlRight';
   if($('#d-kbd').value!=='auto') return e.code;
   return (e.key && e.key.length===1 && US_CODE[e.key]) || e.code;
 }
 window.addEventListener('keydown',e=>{
   if(!grabbing) return;
   if(e.code==='Escape'&&e.shiftKey){setGrab(false);return;}
+  flushClip();
+  const c=codeFor(e);
+  if(isShortcut(e,c,'KeyV')&&ctlOpen()){
+    if(!e.repeat){ downAs[e.code]=null; startPaste(); }  // null: its keyup is not sent either
+    return;                                               // no preventDefault: the browser must paste
+  }
   e.preventDefault();
   if(e.repeat) return;
-  const c=codeFor(e); downAs[e.code]=c; send({t:'kd',code:c});
+  downAs[e.code]=c; send({t:'kd',code:c});
+  if(isShortcut(e,c,'KeyC','KeyX')&&ctlOpen()) startCopy();
 });
 window.addEventListener('keyup',e=>{
   if(!grabbing) return;
   e.preventDefault();
-  const c=downAs[e.code]||e.code; delete downAs[e.code]; send({t:'ku',code:c});
+  if(downAs[e.code]===null){ delete downAs[e.code]; return; }
+  const c=downAs[e.code]||codeFor(e); delete downAs[e.code]; send({t:'ku',code:c});
+  // macOS browsers send no keyup for keys released while ⌘ is held: release them now
+  if(e.key==='Meta') for(const k of Object.keys(downAs)){
+    if(/^(Shift|Control|Alt|Meta)/.test(k)) continue;
+    const d=downAs[k]; delete downAs[k]; if(d) send({t:'ku',code:d});
+  }
 });
 function setGrab(on){
   grabbing=on;
@@ -743,7 +829,7 @@ stage.addEventListener('touchstart',e=>{
   const t=e.touches[0], r=videoRect();
   send({t:'mm',x:Math.min(1,Math.max(0,(t.clientX-r.left)/r.width)),y:Math.min(1,Math.max(0,(t.clientY-r.top)/r.height))});
 },{passive:true});
-stage.addEventListener('touchend',e=>{ send({t:'md',b:0}); send({t:'mu',b:0}); },{passive:true});
+stage.addEventListener('touchend',e=>{ flushClip(); send({t:'md',b:0}); send({t:'mu',b:0}); },{passive:true});
 
 /* auto-hide the top bar */
 let hideTimer;

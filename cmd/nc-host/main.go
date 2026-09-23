@@ -280,15 +280,27 @@ func (h *host) handleOffer(ctx context.Context, m proto.Message) {
 
 	restartCapture := make(chan captureOpts, 1)
 	inj := h.injector()
+	clip := newClipSync()
 	pc.OnDataChannel(func(dc *webrtc.DataChannel) {
 		log.Printf("[%s] data channel %q", peer, dc.Label())
+		if dc.Label() == "control" {
+			clip.dc = dc
+			dc.OnOpen(func() { go clip.run(sctx) })
+		}
 		dc.OnMessage(func(msg webrtc.DataChannelMessage) {
 			var ev proto.InputEvent
 			if err := json.Unmarshal(msg.Data, &ev); err != nil {
 				return
 			}
-			if ev.T == "keyboard" {
+			switch ev.T {
+			case "keyboard":
 				go setKeyboard(ev.Layout)
+				return
+			case "clip":
+				clip.receive(ev) // not in a goroutine: the paste keystroke that follows must find it
+				return
+			case "clipget":
+				clip.get()
 				return
 			}
 			if ev.T == "display" {

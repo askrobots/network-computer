@@ -20,6 +20,7 @@ dbus-x11
 # GUI apps + polish
 mousepad
 xdotool
+xclip
 xinput
 x11-xkb-utils
 xdg-utils

@@ -7,6 +7,13 @@ Plan, 2026-09-23. The streaming works; this is about the network computer feelin
 
 The most noticeable gap in daily use: copy on the Mac, paste on the desk, and back.
 
+**Status: text works in the web client (2026-09-23).** Ctrl/⌘+V puts this device's
+clipboard on the desk and then pastes; Ctrl/⌘+C or X on the desk comes back to this device.
+On a Mac, ⌘ acts as Ctrl on the desk (a checkbox in the 🖥️ panel turns that off). The
+host side uses `xclip` on Linux and `pbcopy`/`pbpaste` on macOS; Windows hosts don't have it
+yet. Tested with `nc-probe -clip` in both directions, up to 350 KB of multibyte text. Still to
+do: images, the Flutter client, Windows hosts.
+
 - **Device to desk (browser):** the page's `paste` event hands over the local clipboard
   without a permission prompt. On Cmd/Ctrl+V the client reads it there, sends it over the
   reliable `control` channel, the host sets the desk clipboard (`xclip`), then forwards the
