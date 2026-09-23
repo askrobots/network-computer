@@ -31,6 +31,8 @@ check "phone mic is the default input"   sh -c '[ "$(pactl get-default-source)" 
 check "host plays client mic (-mic-device)" sh -c 'systemctl cat nc-host | grep -q -- "-mic-device nc-mic"'
 check "waveform launcher installed"      sh -c 'command -v ffplay && command -v nc-mic-scope && test -f /usr/share/applications/nc-mic-scope.desktop'
 check "sound recorder (Audacity) installed" command -v audacity
+check "video player (VLC) is the default"  sh -c 'command -v vlc && grep -q "^video/mp4=vlc.desktop" /etc/xdg/mimeapps.list'
+check "file transfer (nc-send, Send to my device)" sh -c 'command -v nc-send && test -S /run/nc-host/send.sock && grep -q nc-send /home/$NC_DESK_USER/.config/Thunar/uca.xml'
 check "ALSA apps record from pulse"      sh -c 'timeout 5 arecord -q -D default -d 1 -f S16_LE -r 48000 -c 2 /dev/null'
 check "pavucontrol installed"            command -v pavucontrol
 check "no pulse autospawn override"      sh -c '! test -e /etc/pulse/client.conf.d/01-enable-autospawn.conf'

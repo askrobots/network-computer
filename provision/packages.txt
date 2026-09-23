@@ -28,3 +28,4 @@ xdg-utils
 git
 curl
 ufw
+vlc
