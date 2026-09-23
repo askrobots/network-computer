@@ -57,7 +57,7 @@ and files. See [docs/PLAN.md](docs/PLAN.md) for the design,
 | Client | Where | Status |
 |---|---|---|
 | Browser | Built into `nc-rendezvous`: any modern browser, including Safari on iPhone and iPad | Everything above |
-| [Flutter app](https://github.com/askrobots/network-computer-flutter) | iPhone, iPad, Android, macOS, Windows, Linux | Picture, sound, mic, touch and keyboard, pairing; clipboard, files and the screen menu not yet |
+| [Flutter app](https://github.com/askrobots/network-computer-flutter) | iPhone, iPad, Android, macOS, Windows, Linux | Picture, sound, mic, touch and keyboard, pairing, voice button and transcript, search bar, screen size, clipboard both ways; file transfer not yet |
 | `nc-probe` | Command line | Test client: path, frame rate, audio timing, clipboard and file transfer |
 
 ## How it works
