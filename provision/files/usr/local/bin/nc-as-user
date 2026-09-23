@@ -3,8 +3,9 @@
 # home), from root (nc-host, provisioning) or from the user.
 #   nc-as-user COMMAND [ARGS...]
 [ $# -gt 0 ] || { echo "usage: nc-as-user COMMAND [ARGS...]"; exit 2; }
-. /etc/nc/env 2>/dev/null || true
+[ -r /etc/nc/env ] && . /etc/nc/env
 U=${NC_DESK_USER:-user}
+[ "$(id -u)" = 0 ] || U=$(id -un)   # not root: it can only be our own session
 PID=$(pgrep -u "$U" -x xfce4-session | head -1)
 [ -n "$PID" ] || { echo "nc-as-user: no desktop session for $U" >&2; exit 1; }
 ENVS=$(tr '\0' '\n' < "/proc/$PID/environ")

@@ -35,6 +35,11 @@ and files. See [docs/PLAN.md](docs/PLAN.md) for the design,
 - **Files both ways:** drop files on the window and they land on the desk's Desktop. On
   the desk, right-click a file → **Send to my device** (or `nc-send FILE`) and a 📥 button
   appears in the page to save it.
+- **Search, launch and talk:** Alt+Space (or 🔍) searches open windows, apps and files.
+  The 🎙️ button talks to the desk: ask a question or say "open the text editor", and a
+  panel shows what it heard, said and did. Voice runs through the
+  [DBBASIC object server](https://github.com/askrobots/dbbasic-object-server) installed on
+  the desk, with your own API keys kept on the desk.
 - **Secure by default with a domain:** a real Let's Encrypt certificate, a password
   exchanged for a short-lived token, a host PIN typed once and then remembered through
   pairing, and relay credentials minted per session.
@@ -44,7 +49,7 @@ and files. See [docs/PLAN.md](docs/PLAN.md) for the design,
   [docs/DESKS.md](docs/DESKS.md).
 - **One-command desk on DigitalOcean:** `infra/droplet.sh up` builds a provisioned
   Ubuntu desktop (Xfce, Firefox, VLC, Audacity, the tools above) with its DNS name,
-  checked by 51 automated checks; `infra/droplet.sh down` destroys it and keeps the desk.
+  checked by 54 automated checks; `infra/droplet.sh down` destroys it and keeps the desk.
 
 ### Clients
 

@@ -1,0 +1,12 @@
+[Unit]
+Description=network-computer voice: the 🎙️ button's listener
+After=nc-object-server.service nc-host.service nc-audio.service
+Wants=nc-object-server.service
+[Service]
+# the user comes from a drop-in (user.conf) written by apply.sh
+EnvironmentFile=/etc/nc/object-server.env
+ExecStart=/usr/local/bin/nc-voice
+Restart=always
+RestartSec=3
+[Install]
+WantedBy=multi-user.target

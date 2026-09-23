@@ -31,3 +31,5 @@ ufw
 vlc
 rofi
 wmctrl
+espeak-ng
+python3-venv

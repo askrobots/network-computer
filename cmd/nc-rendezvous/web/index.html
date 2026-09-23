@@ -146,6 +146,22 @@
   #focushint{position:fixed;left:50%;top:40%;transform:translateX(-50%);z-index:35;display:none;cursor:pointer;
     background:rgba(20,24,34,.88);border:1px solid var(--line);border-radius:10px;padding:12px 18px;color:#fff}
   #focushint.on{display:block}
+  #voicefab{position:fixed;left:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:31;display:none;
+    width:56px;height:56px;border-radius:50%;border:1px solid var(--line);background:var(--panel2);font-size:26px;
+    cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.4)}
+  #session.on #voicefab{display:block}
+  #voicefab.on{background:#d33;border-color:#f66;animation:vpulse 1.6s ease-in-out infinite}
+  @keyframes vpulse{50%{box-shadow:0 0 0 10px rgba(221,51,51,.25)}}
+  #voicepanel{position:fixed;left:16px;bottom:calc(84px + env(safe-area-inset-bottom,0px));z-index:31;display:none;
+    width:min(440px,80vw);max-height:42vh;flex-direction:column;background:rgba(18,22,32,.9);color:#eee;
+    border:1px solid var(--line);border-radius:10px;font-size:14px;box-shadow:0 6px 20px rgba(0,0,0,.4)}
+  #voicepanel.show{display:flex}
+  #voicehead{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line)}
+  #voicehead button{background:none;border:0;color:inherit;font-size:16px;cursor:pointer}
+  #voicelog{overflow:auto;padding:8px 12px;display:flex;flex-direction:column;gap:6px}
+  #voicelog .you{color:#fff} #voicelog .you::before{content:"You: ";color:#9ab}
+  #voicelog .ai{color:#bfe0ff} #voicelog .ai::before{content:"Desk: ";color:#7ab}
+  #voicelog .did{color:#9d9;font-size:13px} #voicelog .err{color:#fb8;font-size:13px}
   #clipbox{position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0}
 </style>
 
@@ -215,6 +231,8 @@
     <select id="d-kbd" title="The layout of the keyboard on this device"></select>
     <label id="d-cmdl" title="⌘C, ⌘V, ⌘Z… work as Ctrl shortcuts on the desk" hidden><input type="checkbox" id="d-cmd"> ⌘ = Ctrl</label>
   </div>
+  <button id="voicefab" title="Talk to the desk (voice on/off)">🎙️</button>
+  <div id="voicepanel"><div id="voicehead"><b id="voicestate">Voice off</b><button id="voiceclose" title="Hide">✕</button></div><div id="voicelog"></div></div>
   <div id="focushint">⌨️ Typing is going to another app. Click here to type on the desk.</div>
   <div id="dropzone">Drop to send to the desk's Desktop</div>
   <div id="downloads" title="Files sent from the desk: click to save"></div>
@@ -378,7 +396,7 @@ async function openPeer(){
   ctl=pc.createDataChannel('control');
   ctl.onmessage=onCtl;
   pc.ondatachannel=e=>{ if(e.channel.label==='file') receiveFile(e.channel); };
-  ctl.onopen=()=>{ lastDisplay=null; sendDisplay(); sendKeyboard(false); };
+  ctl.onopen=()=>{ lastDisplay=null; sendDisplay(); sendKeyboard(false); voiceShow(false); };
 
   pc.ontrack=ev=>{
     stream.addTrack(ev.track);
@@ -726,6 +744,8 @@ function onCtl(ev){
     const t=clipIn; clipIn=''; clipAsked=false;
     if(copyWaiter){ copyWaiter.res(new Blob([t],{type:'text/plain'})); copyWaiter=null; return; }
     clipPending=t; flushClip();
+  }else if(m.t==='voice'){
+    onVoice(m);
   }else if(m.t==='clipnone'){
     if(copyWaiter){ copyWaiter.rej(new Error('nothing copied')); copyWaiter=null; }
     if(clipAsked){ clipAsked=false; toast("The desk's clipboard has no text"); }
@@ -826,6 +846,36 @@ function offerDownload(name,blob){
   box.appendChild(a); box.classList.add('on');
   toast(`From the desk: ${name} (click 📥 to save)`);
 }
+/* ---------- voice ---------- */
+// 🎙️ turns listening on the desk on and off (nc-voice hears the microphone
+// this page already sends). The panel shows what it heard, said and did.
+let voiceOn=false;
+const VOICE_STATE={listening:'Listening…',hearing:'Hearing you…',thinking:'Thinking…',off:'Voice off'};
+function voiceShow(on){ voiceOn=on; $('#voicefab').classList.toggle('on',on); if(!on) $('#voicestate').textContent='Voice off'; }
+async function setVoice(on){
+  if(!ctlOpen()) return;
+  if(on&&!micStream){ await setMic(true); if(!micStream) return; }
+  voiceShow(on);
+  $('#voicepanel').classList.add('show');
+  $('#voicestate').textContent=on?'Starting…':'Voice off';
+  ctl.send(JSON.stringify({t:'voice',on}));
+}
+function voiceLine(cls,text){
+  const log=$('#voicelog'), d=document.createElement('div');
+  d.className=cls; d.textContent=text; log.appendChild(d);
+  while(log.children.length>40) log.firstChild.remove();
+  log.scrollTop=log.scrollHeight;
+}
+function onVoice(m){
+  $('#voicepanel').classList.add('show');
+  if(m.kind==='state'){ $('#voicestate').textContent=VOICE_STATE[m.text]||m.text; if(m.text==='off') voiceShow(false); }
+  else if(m.kind==='heard') voiceLine('you',m.text);
+  else if(m.kind==='said') voiceLine('ai',m.text);
+  else if(m.kind==='did') voiceLine('did','✓ '+m.text);
+  else if(m.kind==='error'){ voiceLine('err','⚠ '+m.text); if(/not running/.test(m.text)) voiceShow(false); }
+}
+$('#voicefab').onclick=()=>setVoice(!voiceOn);
+$('#voiceclose').onclick=()=>$('#voicepanel').classList.remove('show');
 function isShortcut(e,code,...codes){ return codes.includes(code)&&(e.ctrlKey||(e.metaKey&&cmdIsCtrl()))&&!e.altKey; }
 
 /* ---------- fullscreen ---------- */

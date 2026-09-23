@@ -218,7 +218,10 @@ func (h *host) serveSend(path string) {
 	}
 	os.Chmod(path, 0o666) // the desk user runs nc-send; it streams the file itself, so it can only send what it can read
 	log.Printf("send socket: %s", path)
-	http.Serve(l, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/voice/commands", h.handleVoiceCommands)
+	mux.HandleFunc("/voice/event", h.handleVoiceEvent)
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		name := safeName(r.URL.Query().Get("name"))
 		if r.Method != http.MethodPut || name == "" {
 			http.Error(w, "PUT /send?name=FILE with the file as the body", http.StatusBadRequest)
@@ -271,7 +274,8 @@ func (h *host) serveSend(path string) {
 		}
 		log.Printf("sent %s (%s) to %d device(s)", name, humanBytes(size), sent)
 		fmt.Fprintf(w, "sent %s to %d device(s)\n", name, sent)
-	}))
+	})
+	http.Serve(l, mux)
 }
 
 // safeName keeps only the last element of a client-supplied name and drops

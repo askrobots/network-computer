@@ -1,0 +1,40 @@
+#!/bin/sh
+# Make the desk's object server ready for voice: the desk user exists, their
+# AI keys (from the desk's secrets file) are stored as the user's service keys,
+# and the app packages are installed. Run by apply.sh as root; safe to repeat.
+# Key values are read from the file and passed on stdin, never printed.
+set -e
+. /etc/nc/env
+. /etc/nc/object-server.env
+OS=/opt/dbbasic-object-server; PY=$OS/.venv/bin/python
+U=$NC_DESK_USER
+asuser() { runuser -u "$U" -- env DBBASIC_DATA_DIR="$DBBASIC_DATA_DIR" DBBASIC_OBJECTS_DIR="$DBBASIC_OBJECTS_DIR" "$@"; }
+cd "$OS"
+for i in $(seq 30); do curl -sf http://127.0.0.1:8001/health >/dev/null && break; sleep 1; done
+
+if ! asuser "$PY" object_identity_cli.py list-users --json 2>/dev/null | grep -q "\"$U\""; then
+  head -c 24 /dev/urandom | base64 | asuser "$PY" object_identity_cli.py create-superuser --user-id "$U" --display-name "$U" --password-stdin >/dev/null
+  echo "   object server user $U created"
+fi
+
+SECRETS=/desk/secrets/env; [ -r "$SECRETS" ] || SECRETS=/etc/nc/secrets.env
+if [ -r "$SECRETS" ]; then
+  asuser "$PY" - "$U" "$SECRETS" <<'PYEOF'
+import sys, object_service_keys, os
+user, path = sys.argv[1], sys.argv[2]
+names = {"ANTHROPIC_API_KEY": "anthropic", "OPENAI_API_KEY": "openai"}
+done = []
+for line in open(path):
+    k, _, v = line.strip().partition("=")
+    if k in names and v.strip():
+        object_service_keys.set_service_key(user, names[k], v.strip().strip('"\''),
+                                            base_dir=os.environ["DBBASIC_DATA_DIR"])
+        done.append(names[k])
+print("   keys stored for:", ", ".join(done) or "none")
+PYEOF
+fi
+
+for p in app-theme app-views app-nav app-shell; do
+  code=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Token $DBBASIC_ADMIN_TOKEN" "http://127.0.0.1:8001/packages/$p/install")
+  echo "   package $p: $code"
+done

@@ -79,9 +79,11 @@ deps() {
     audio)      echo /etc/systemd/system/nc-audio.service /usr/local/bin/nc-audio-setup /etc/pulse/client.conf /etc/pulse/daemon.conf.d/nc.conf ;;
     rendezvous) echo /etc/systemd/system/nc-rendezvous.service /etc/systemd/system/nc-rendezvous.service.d/*.conf /usr/local/bin/nc-rendezvous /etc/nc/env ;;
     host)       echo /etc/systemd/system/nc-host.service /etc/systemd/system/nc-host.service.d/*.conf /usr/local/bin/nc-host /etc/nc/env ;;
+    object-server) echo /etc/systemd/system/nc-object-server.service /etc/systemd/system/nc-object-server.service.d/*.conf /etc/nc/object-server.env /opt/dbbasic-object-server/.git/HEAD /opt/dbbasic-object-server/.git/refs/heads/main ;;
+    voice)      echo /etc/systemd/system/nc-voice.service /etc/systemd/system/nc-voice.service.d/*.conf /usr/local/bin/nc-voice /etc/nc/object-server.env ;;
   esac
 }
-snapshot() { for s in xorg desktop audio rendezvous host; do echo "$s $(cat $(deps $s) 2>/dev/null | md5sum | cut -c1-12)"; done; }
+snapshot() { for s in xorg desktop audio rendezvous host object-server voice; do echo "$s $(cat $(deps $s) 2>/dev/null | md5sum | cut -c1-12)"; done; }
 BEFORE=$(snapshot)
 
 echo ">> packages"
@@ -184,8 +186,47 @@ Group=$NC_DESK_USER
 Environment=HOME=$UHOME
 WorkingDirectory=$UHOME
 EOT
+echo ">> object server (voice, AI; local only, as $NC_DESK_USER)"
+OS=/opt/dbbasic-object-server
+if [ ! -d $OS/.git ]; then
+  git clone -q https://github.com/askrobots/dbbasic-object-server $OS
+else
+  git -C $OS pull -q
+fi
+[ -x $OS/.venv/bin/uvicorn ] || python3 -m venv $OS/.venv
+$OS/.venv/bin/pip install -q -e "$OS[server]"   # editable: the package list omits some modules
+OSDATA=/var/lib/nc-object-server; [ -n "$DESK" ] && OSDATA=/desk/object-server
+install -d -o "$NC_DESK_USER" -g "$NC_DESK_USER" -m 0700 "$OSDATA" "$OSDATA/data" "$OSDATA/objects"
+OSENV=/etc/nc/object-server.env
+if [ -n "$DESK" ]; then
+  mkdir -p /desk/nc
+  [ -s /desk/nc/object-server.env ] || { [ -f $OSENV ] && [ ! -L $OSENV ] && mv $OSENV /desk/nc/object-server.env; }
+  ln -sfn /desk/nc/object-server.env $OSENV
+fi
+if [ ! -s $OSENV ]; then
+  umask 077
+  cat > $OSENV <<EOT
+# the desk's object server; the admin token opens sessions for nc-voice
+DBBASIC_ADMIN_TOKEN=$(head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 32)
+EOT
+  umask 022
+fi
+oset() { grep -q "^$1=" $OSENV && sed -i --follow-symlinks "s|^$1=.*|$1=$2|" $OSENV || echo "$1=$2" >> $OSENV; }
+oset DBBASIC_DATA_DIR "$OSDATA/data"
+oset DBBASIC_OBJECTS_DIR "$OSDATA/objects"
+oset DBBASIC_PACKAGES_DIR "$OS/packages"
+oset NC_DESK_USER "$NC_DESK_USER"
+for f in ENABLE_AI_CHAT ENABLE_TTS ENABLE_STT ENABLE_READER ENABLE_SITE_ROUTES ENABLE_PACKAGE_INSTALLS \
+         ENABLE_PASSWORD_LOGIN ENABLE_PERMISSION_ENFORCEMENT; do oset DBBASIC_$f true; done
+oset DBBASIC_COOKIE_SECURE false
+chmod 600 "$(readlink -f $OSENV)"   # root only: systemd reads it before switching to the user
+for s in nc-object-server nc-voice; do
+  install -d /etc/systemd/system/$s.service.d
+  printf '[Service]\nUser=%s\nGroup=%s\n' "$NC_DESK_USER" "$NC_DESK_USER" > /etc/systemd/system/$s.service.d/user.conf
+done
+
 # services that read the desk wait for it at boot
-for s in nc-desktop nc-host nc-rendezvous; do
+for s in nc-desktop nc-host nc-rendezvous nc-object-server nc-voice; do
   install -d /etc/systemd/system/$s.service.d
   if [ -n "$DESK" ]; then
     printf '[Unit]\nRequiresMountsFor=/desk\n' > /etc/systemd/system/$s.service.d/desk.conf
@@ -203,7 +244,7 @@ ufw --force enable >/dev/null
 echo ">> services"
 AFTER=$(snapshot)
 systemctl daemon-reload
-for s in xorg desktop audio rendezvous host; do
+for s in xorg desktop audio rendezvous host object-server voice; do
   was=$(echo "$BEFORE" | awk -v s=$s '$1==s{print $2}')
   now=$(echo "$AFTER"  | awk -v s=$s '$1==s{print $2}')
   if [ "$was" != "$now" ] && systemctl is-active --quiet nc-$s; then
@@ -213,9 +254,10 @@ for s in xorg desktop audio rendezvous host; do
     [ $s = audio ] && systemctl is-active --quiet nc-host && systemctl restart nc-host
   fi
 done
-systemctl enable --now nc-xorg nc-desktop nc-audio nc-rendezvous nc-host
+systemctl enable --now nc-xorg nc-desktop nc-audio nc-rendezvous nc-host nc-object-server nc-voice
 sleep 4
-systemctl is-active nc-xorg nc-desktop nc-audio nc-rendezvous nc-host | paste -sd' ' -
+systemctl is-active nc-xorg nc-desktop nc-audio nc-rendezvous nc-host nc-object-server nc-voice | paste -sd' ' -
+nc-object-bootstrap || echo "!! object server bootstrap failed"
 # session settings (Alt+Space...) apply at every login; apply them to the running session now
 for i in 1 2 3 4 5; do nc-session-setup >/dev/null 2>&1 && break; sleep 2; done
 echo

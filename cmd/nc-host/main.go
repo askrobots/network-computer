@@ -41,6 +41,7 @@ type host struct {
 	pairs               *pairing
 	display             displayControl
 	filesDir            string
+	voice               voiceRelay
 	injOnce             sync.Once
 	inj                 input.Injector
 
@@ -52,6 +53,7 @@ type host struct {
 type session struct {
 	pc     *webrtc.PeerConnection
 	cancel context.CancelFunc
+	ctl    *webrtc.DataChannel // the client's "control" channel, once open
 }
 
 func main() {
@@ -234,7 +236,11 @@ func (h *host) handleOffer(ctx context.Context, m proto.Message) {
 		if h.sessions[peer] == s {
 			delete(h.sessions, peer)
 		}
+		nobody := len(h.sessions) == 0
 		h.mu.Unlock()
+		if nobody {
+			h.voice.command(false) // no one to listen to
+		}
 	}
 
 	video, err := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264}, "video", "nc")
@@ -295,6 +301,9 @@ func (h *host) handleOffer(ctx context.Context, m proto.Message) {
 		}
 		if dc.Label() == "control" {
 			clip.dc = dc
+			h.mu.Lock()
+			s.ctl = dc
+			h.mu.Unlock()
 			dc.OnOpen(func() { go clip.run(sctx) })
 		}
 		dc.OnMessage(func(msg webrtc.DataChannelMessage) {
@@ -317,6 +326,12 @@ func (h *host) handleOffer(ctx context.Context, m proto.Message) {
 				return
 			case "launch":
 				go launch()
+				return
+			case "voice":
+				if !h.voice.command(ev.On) {
+					b, _ := json.Marshal(proto.InputEvent{T: "voice", Kind: "error", Text: "voice is not running on this desk"})
+					dc.SendText(string(b))
+				}
 				return
 			}
 			if ev.T == "display" {

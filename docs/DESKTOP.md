@@ -92,6 +92,29 @@ file. ⌘Space never reaches the desk (macOS keeps it for Spotlight), hence Alt+
 window menu moved to Shift+Alt+Space. `nc-launch` is the same bar from a script, and voice
 will drive the same actions. Later: document contents (Recoll), a calculator, web search.
 
+## Voice (first version works, 2026-09-23)
+
+The round 🎙️ button (bottom left, always visible while connected) turns listening on and
+off; it turns the microphone on if needed. A panel shows the state (listening, hearing
+you, thinking) and every turn: what it heard, what it said, what it did.
+
+- `nc-voice` on the desk listens to the client's microphone (the `nc-mic-in` source),
+  cuts it into utterances at pauses, and sends each to the **object server** installed on
+  the desk (`nc-object-server`, local only, data on the desk volume): speech to text,
+  then the AI (Claude Haiku by default), then text to speech, played on the desk so it
+  comes back through the stream. It doesn't hear itself while speaking.
+- The AI answers with what to say and a list of desktop actions, which nc-voice does in
+  the session: open an app, switch to or close a window, open a file or URL, type text,
+  press keys, open the search bar with a query.
+- Keys: the desk's `/desk/secrets/env` is loaded into the object server as the user's
+  service keys by `nc-object-bootstrap` (never printed).
+- Tested with synthesized speech: "What time is it?" answered correctly (about 9 s
+  including the spoken reply); "Open the text editor" opened Mousepad (about 6 s).
+
+Next: faster (stream the reply, speak the first sentence first; local whisper.cpp and
+Piper), a wake word, reading the screen, the clipboard and files as context, and the
+object server's own records and tools.
+
 ## 5. Your session comes back
 
 Windows, terminal sessions (`tmux` on the desk) and Firefox tabs restored after a rebuild,

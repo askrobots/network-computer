@@ -1,0 +1,403 @@
+#!/usr/bin/env python3
+"""nc-voice: talk to the desk.
+
+The client's 🎙️ button turns listening on and off (through nc-host's local
+socket). While on, the client's microphone (the pulse source nc-mic-in) is cut
+into utterances at pauses, and each goes to the local object server: speech to
+text, then the AI, then text to speech, played on the desk so it comes back
+through the stream. The AI answers with what to say and which desktop actions
+to take; nc-voice does them in the desktop session and reports every step
+(state, heard, said, did, error) to the client's transcript panel.
+
+Standard library only. Configuration from the environment:
+  DBBASIC_ADMIN_TOKEN   the object server's admin token (to open a session)
+  NC_DESK_USER          the object server user to act as (default: this user)
+  NC_OBJECT_SERVER      default http://127.0.0.1:8001
+  NC_VOICE_MODEL        default anthropic:claude-haiku-4-5
+  NC_VOICE_TTS          openai (default) or local
+  NC_VOICE_SOURCE       pulse source to listen to, default nc-mic-in
+  NC_HOST_SOCKET        default /run/nc-host/send.sock
+"""
+import array
+import glob
+import http.client
+import io
+import json
+import math
+import os
+import queue
+import re
+import socket
+import subprocess
+import sys
+import threading
+import time
+import urllib.error
+import urllib.request
+import wave
+
+OBJ = os.environ.get("NC_OBJECT_SERVER", "http://127.0.0.1:8001").rstrip("/")
+ADMIN = os.environ.get("DBBASIC_ADMIN_TOKEN", "")
+USER = os.environ.get("NC_DESK_USER") or os.environ.get("USER", "")
+MODEL = os.environ.get("NC_VOICE_MODEL", "anthropic:claude-haiku-4-5")
+TTS = os.environ.get("NC_VOICE_TTS", "openai")
+SOURCE = os.environ.get("NC_VOICE_SOURCE", "nc-mic-in")
+SOCK = os.environ.get("NC_HOST_SOCKET", "/run/nc-host/send.sock")
+
+RATE = 16000
+FRAME = 320            # 20 ms of 16-bit mono
+PREROLL = 15           # frames kept from before speech starts (300 ms)
+START = 3              # loud frames that start an utterance
+END = 45               # quiet frames that end one (900 ms)
+MAX_FRAMES = 30 * 50   # 30 s
+MIN_SPEECH = 20        # 400 ms of speech, or it was a noise
+
+
+def log(*a):
+    print(*a, file=sys.stderr, flush=True)
+
+
+# ---------- nc-host: commands in, events out ----------
+
+class UnixHTTP(http.client.HTTPConnection):
+    def __init__(self, path, timeout=None):
+        super().__init__("localhost", timeout=timeout)
+        self.unix_path = path
+
+    def connect(self):
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.connect(self.unix_path)
+        self.sock = s
+
+
+def event(kind, text=""):
+    log(f"{kind}: {text}")
+    try:
+        c = UnixHTTP(SOCK, timeout=5)
+        c.request("POST", "/voice/event", json.dumps({"kind": kind, "text": text}),
+                  {"Content-Type": "application/json"})
+        c.getresponse().read()
+        c.close()
+    except OSError:
+        pass
+
+
+# ---------- the object server: speech to text, AI, text to speech ----------
+
+class ObjectServer:
+    def __init__(self):
+        self.token = None
+
+    def _open_session(self):
+        body = json.dumps({"user_id": USER, "ttl_seconds": 12 * 3600, "label": "nc-voice"}).encode()
+        req = urllib.request.Request(OBJ + "/identity/sessions", body, method="POST",
+                                     headers={"Authorization": "Token " + ADMIN,
+                                              "Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            res = json.load(r)
+        self.token = res.get("token") or (res.get("session") or {}).get("token")
+        if not self.token:
+            raise RuntimeError("object server returned no session token")
+
+    def call(self, path, body, ctype, timeout=60, retry=True):
+        if not self.token:
+            self._open_session()
+        req = urllib.request.Request(OBJ + path, body, method="POST",
+                                     headers={"Authorization": "Bearer " + self.token,
+                                              "Content-Type": ctype})
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return r.read(), r.headers.get("Content-Type", "")
+        except urllib.error.HTTPError as e:
+            if e.code == 401 and retry:
+                self.token = None
+                return self.call(path, body, ctype, timeout, retry=False)
+            detail = e.read().decode(errors="replace")
+            try:
+                detail = json.loads(detail).get("error", detail)
+            except ValueError:
+                pass
+            raise RuntimeError(f"{path}: {detail}") from None
+
+    def stt(self, wav):
+        data, _ = self.call("/api/stt", wav, "audio/wav")
+        return json.loads(data).get("text", "").strip()
+
+    def chat(self, message, history, system):
+        body = json.dumps({"message": message, "model": MODEL, "system": system,
+                           "history": history}).encode()
+        data, _ = self.call("/api/ai/chat", body, "application/json", timeout=90)
+        return json.loads(data).get("reply", "")
+
+    def tts(self, text):
+        body = json.dumps({"text": text[:800], "engine": TTS}).encode()
+        data, _ = self.call("/api/tts", body, "application/json")
+        return data
+
+
+# ---------- the desktop ----------
+
+def desk(*cmd, timeout=10):
+    """Run a command in the desk user's desktop session."""
+    return subprocess.run(["nc-as-user", *cmd], capture_output=True, text=True, timeout=timeout)
+
+
+def open_windows():
+    try:
+        out = desk("wmctrl", "-l").stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    titles = []
+    for line in out.splitlines():
+        parts = line.split(None, 3)
+        if len(parts) == 4 and parts[3] not in ("Desktop", "xfce4-panel"):
+            titles.append(parts[3])
+    return titles
+
+
+def installed_apps():
+    apps = {}
+    for path in sorted(glob.glob("/usr/share/applications/*.desktop")):
+        name, hidden = None, False
+        with open(path, errors="replace") as f:
+            for line in f:
+                if line.startswith("[") and name is not None and not line.startswith("[Desktop Entry]"):
+                    break
+                if line.startswith("Name=") and name is None:
+                    name = line[5:].strip()
+                elif line.strip() in ("NoDisplay=true", "Hidden=true"):
+                    hidden = True
+        if name and not hidden:
+            apps[os.path.basename(path)[:-8]] = name
+    return apps
+
+
+APPS = installed_apps()
+
+
+def act(a):
+    """Do one action from the AI; return what was done, for the transcript."""
+    kind = a.get("do")
+    if kind == "open_app":
+        app = a.get("app", "")
+        if app not in APPS:
+            match = [k for k, v in APPS.items() if app.lower() in (k + " " + v).lower()]
+            if not match:
+                raise RuntimeError(f"no app called {app}")
+            app = match[0]
+        subprocess.Popen(["nc-as-user", "gtk-launch", app], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return f"opened {APPS.get(app, app)}"
+    if kind == "switch":
+        w = a.get("window", "")
+        if desk("wmctrl", "-a", w).returncode != 0:
+            raise RuntimeError(f"no window like {w}")
+        return f"switched to {w}"
+    if kind == "close":
+        w = a.get("window", "")
+        if desk("wmctrl", "-c", w).returncode != 0:
+            raise RuntimeError(f"no window like {w}")
+        return f"closed {w}"
+    if kind == "open":
+        t = os.path.expanduser(a.get("target", ""))
+        subprocess.Popen(["nc-as-user", "xdg-open", t], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return f"opened {a.get('target', '')}"
+    if kind == "type":
+        text = a.get("text", "")
+        desk("xdotool", "type", "--delay", "8", "--", text, timeout=60)
+        return f"typed {len(text)} characters"
+    if kind == "keys":
+        k = a.get("keys", "")
+        if not re.fullmatch(r"[A-Za-z0-9_+ ]{1,60}", k):
+            raise RuntimeError(f"odd keys {k!r}")
+        desk("xdotool", "key", "--", *k.split())
+        return f"pressed {k}"
+    if kind == "search":
+        q = a.get("query", "")
+        subprocess.Popen(["nc-launch", "search", q], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return f"searched for {q}"
+    raise RuntimeError(f"unknown action {kind!r}")
+
+
+SYSTEM = """You are the voice of a Linux desktop (Xfce) that its user reaches through a
+remote-desktop client. You hear them through their microphone and they hear your
+"say" text spoken. Keep "say" short (one or two sentences), plain spoken words, no
+markdown, no lists. Reply with ONLY a JSON object:
+{"say": "...", "actions": [ ... ]}
+Actions, done in order:
+  {"do": "open_app", "app": "<app id from the list>"}
+  {"do": "switch", "window": "<part of an open window's title>"}
+  {"do": "close", "window": "<part of an open window's title>"}
+  {"do": "open", "target": "<file path like ~/Desktop/x.pdf, or a URL>"}
+  {"do": "type", "text": "<text to type into the focused window>"}
+  {"do": "keys", "keys": "<xdotool key names, e.g. ctrl+s or Return>"}
+  {"do": "search", "query": "<text>"}   (opens the desk's search bar with this query)
+Use no actions when they are just talking or asking something. Web searches: open a
+URL such as https://duckduckgo.com/?q=... . Their files are in ~/Desktop and
+~/Documents. Speech recognition makes mistakes: guess the likely meaning."""
+
+
+def context():
+    wins = open_windows()
+    apps = ", ".join(f"{k} ({v})" for k, v in APPS.items())
+    return (f"Open windows: {json.dumps(wins)}\nInstalled apps (id (name)): {apps}\n"
+            f"Time: {time.strftime('%A %Y-%m-%d %H:%M')}")
+
+
+def parse_reply(reply):
+    m = re.search(r"\{.*\}", reply, re.S)
+    if m:
+        try:
+            d = json.loads(m.group(0))
+            if isinstance(d, dict):
+                acts = d.get("actions") or []
+                return str(d.get("say", "")), [x for x in acts if isinstance(x, dict)]
+        except ValueError:
+            pass
+    return reply.strip(), []
+
+
+# ---------- listening ----------
+
+def rms(frame):
+    s = array.array("h", frame)
+    return math.sqrt(sum(x * x for x in s) / max(1, len(s)))
+
+
+def to_wav(frames):
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(RATE)
+        w.writeframes(b"".join(frames))
+    return buf.getvalue()
+
+
+class Voice:
+    def __init__(self):
+        self.obj = ObjectServer()
+        self.on = False
+        self.speaking = threading.Event()
+        self.rec = None
+        self.utterances = queue.Queue()
+        self.history = []
+        threading.Thread(target=self.worker, daemon=True).start()
+
+    def start(self):
+        if self.on:
+            return
+        self.on = True
+        self.rec = subprocess.Popen(["ffmpeg", "-loglevel", "error", "-f", "pulse", "-i", SOURCE,
+                                     "-ac", "1", "-ar", str(RATE), "-f", "s16le", "-"],
+                                    stdout=subprocess.PIPE, stdin=subprocess.DEVNULL)
+        threading.Thread(target=self.listen, args=(self.rec,), daemon=True).start()
+        event("state", "listening")
+
+    def stop(self):
+        if not self.on:
+            return
+        self.on = False
+        if self.rec:
+            self.rec.terminate()
+        event("state", "off")
+
+    def listen(self, rec):
+        pre, cur, loud, quiet, speech = [], None, 0, 0, 0
+        floor = 300.0
+        while True:
+            frame = rec.stdout.read(FRAME * 2)
+            if len(frame) < FRAME * 2:
+                break
+            if self.speaking.is_set():   # don't hear ourselves
+                pre, cur, loud = [], None, 0
+                continue
+            level = rms(frame)
+            if cur is None:
+                floor = 0.98 * floor + 0.02 * min(level, 3000)
+            thresh = max(600.0, floor * 3)
+            is_loud = level > thresh
+            if cur is None:
+                pre = (pre + [frame])[-PREROLL:]
+                loud = loud + 1 if is_loud else 0
+                if loud >= START:
+                    cur, quiet, speech = list(pre), 0, loud
+                    event("state", "hearing")
+                continue
+            cur.append(frame)
+            if is_loud:
+                speech, quiet = speech + 1, 0
+            else:
+                quiet += 1
+            if quiet >= END or len(cur) >= MAX_FRAMES:
+                if speech >= MIN_SPEECH:
+                    self.utterances.put(to_wav(cur))
+                elif self.on:
+                    event("state", "listening")
+                pre, cur, loud = [], None, 0
+        if cur and speech >= MIN_SPEECH:   # stopped mid-sentence: still answer it
+            self.utterances.put(to_wav(cur))
+
+    def worker(self):
+        while True:
+            wav = self.utterances.get()
+            try:
+                self.handle(wav)
+            except Exception as e:  # keep listening whatever went wrong
+                event("error", str(e))
+            if self.on and self.utterances.empty():
+                event("state", "listening")
+
+    def handle(self, wav):
+        event("state", "thinking")
+        text = self.obj.stt(wav)
+        if not text:
+            return
+        event("heard", text)
+        reply = self.obj.chat(text + "\n\n" + context(), self.history[-12:], SYSTEM)
+        say, actions = parse_reply(reply)
+        for a in actions:
+            try:
+                event("did", act(a))
+            except Exception as e:
+                event("error", str(e))
+        self.history += [{"role": "user", "content": text},
+                         {"role": "assistant", "content": json.dumps({"say": say, "actions": actions})}]
+        if say:
+            event("said", say)
+            self.speak(say)
+
+    def speak(self, text):
+        audio = self.obj.tts(text)
+        self.speaking.set()
+        try:
+            subprocess.run(["ffmpeg", "-loglevel", "error", "-i", "pipe:0", "-f", "pulse", "nc-voice"],
+                           input=audio, timeout=120)
+        finally:
+            time.sleep(0.3)   # let the tail of our own voice pass the mic
+            self.speaking.clear()
+
+
+def main():
+    if not ADMIN:
+        sys.exit("nc-voice: DBBASIC_ADMIN_TOKEN is not set")
+    v = Voice()
+    while True:   # follow nc-host's command stream; reconnect when it restarts
+        try:
+            c = UnixHTTP(SOCK)
+            c.request("GET", "/voice/commands")
+            r = c.getresponse()
+            log("connected to nc-host")
+            for line in r:
+                cmd = json.loads(line).get("cmd")
+                if cmd == "on":
+                    v.start()
+                elif cmd == "off":
+                    v.stop()
+        except (OSError, ValueError, http.client.HTTPException) as e:
+            log(f"nc-host: {e}")
+        v.stop()
+        time.sleep(2)
+
+
+if __name__ == "__main__":
+    main()
