@@ -352,7 +352,10 @@ func main() {
 			Cache:      autocert.DirCache(filepath.Join(*stateDir, "acme")),
 		}
 		srv.Addr = ":443"
-		srv.TLSConfig = &tls.Config{GetCertificate: m.GetCertificate, MinVersion: tls.VersionTLS12}
+		// m.TLSConfig advertises acme-tls/1, which the tls-alpn-01 challenge
+		// needs; a hand-built config without it fails certificate issuance.
+		srv.TLSConfig = m.TLSConfig()
+		srv.TLSConfig.MinVersion = tls.VersionTLS12
 		go http.ListenAndServe(":80", m.HTTPHandler(nil))
 		log.Printf("secure mode: HTTPS on :443 for %s (ACME)", *acmeDomain)
 		startLocal()

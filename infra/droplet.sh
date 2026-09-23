@@ -32,8 +32,10 @@ case "$1" in
   dns)
     FQDN=${2:?usage: droplet.sh dns <name.domain>}; IP=$(ip)
     # longest DigitalOcean zone that is a suffix of the name
-    ZONE=$(doctl compute domain list --format Domain --no-header | while read -r z; do
-      case "$FQDN" in *."$z") echo "${#z} $z" ;; esac; done | sort -rn | head -1 | cut -d' ' -f2)
+    ZONE=$(doctl compute domain list --format Domain --no-header | awk -v f="$FQDN" '
+      { z=$1; n=length(z)
+        if (length(f) > n && substr(f, length(f)-n) == "." z && n > best) { best=n; zone=z } }
+      END { print zone }')
     [ -n "$ZONE" ] || { echo "no DigitalOcean DNS zone for $FQDN"; exit 1; }
     REC=${FQDN%."$ZONE"}
     ID=$(doctl compute domain records list "$ZONE" --format ID,Type,Name --no-header | awk -v n="$REC" '$2=="A" && $3==n{print $1; exit}')
