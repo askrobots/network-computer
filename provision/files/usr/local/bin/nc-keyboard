@@ -1,0 +1,17 @@
+#!/bin/sh
+# Set the desk's keyboard layout, record it on the desk, and apply it now.
+#   nc-keyboard us            US QWERTY
+#   nc-keyboard us:dvorak     US Dvorak
+#   nc-keyboard gb | de | fr | us:colemak ...
+set -e
+K=${1:?usage: nc-keyboard <layout>[:<variant>]   e.g. us:dvorak}
+echo "$K" | grep -Eq '^[a-z]{2,3}(:[a-z0-9_-]{1,32})?$' || { echo "nc-keyboard: bad layout '$K'"; exit 2; }
+L=${K%%:*}; V=${K#*:}; [ "$V" = "$K" ] && V=""
+[ -f "/usr/share/X11/xkb/symbols/$L" ] || { echo "nc-keyboard: no layout '$L'"; exit 2; }
+if [ -n "$V" ] && ! grep -q "xkb_symbols \"$V\"" "/usr/share/X11/xkb/symbols/$L"; then
+  echo "nc-keyboard: layout '$L' has no variant '$V'"; exit 2
+fi
+if grep -q '^NC_KEYBOARD=' /etc/nc/env; then sed -i --follow-symlinks "s|^NC_KEYBOARD=.*|NC_KEYBOARD=$K|" /etc/nc/env
+else echo "NC_KEYBOARD=$K" >> /etc/nc/env; fi
+nc-input-hook
+echo "keyboard layout $K"

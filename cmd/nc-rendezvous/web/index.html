@@ -191,6 +191,8 @@
     <span>🖥️</span>
     <select id="d-res" title="Screen size"></select>
     <select id="d-scale" title="Text and UI scale"></select>
+    <span>⌨️</span>
+    <select id="d-kbd" title="The layout of the keyboard on this device"></select>
   </div>
   <div id="micpanel">
     <span>🎤</span>
@@ -349,7 +351,7 @@ async function openPeer(){
   dc=pc.createDataChannel('input',{ordered:false,maxRetransmits:0});
   // reliable + ordered: requests that must not be dropped (screen size, later files and clipboard)
   ctl=pc.createDataChannel('control');
-  ctl.onopen=()=>{ lastDisplay=null; sendDisplay(); };
+  ctl.onopen=()=>{ lastDisplay=null; sendDisplay(); sendKeyboard(false); };
 
   pc.ontrack=ev=>{
     stream.addTrack(ev.track);
@@ -622,6 +624,21 @@ window.addEventListener('resize',()=>{
   if(!/^(window|sharp)$/.test($('#d-res').value)) return;
   clearTimeout(resizeTimer); resizeTimer=setTimeout(sendDisplay,700);   // settle before asking
 });
+
+/* ---------- keyboard layout ---------- */
+// Keys travel as physical positions (so shortcuts and special keys are exact);
+// the desktop turns them into characters with a layout, which has to be the
+// layout of the keyboard on this device. Remembered per browser.
+const KBDS=[['us','US QWERTY'],['us:dvorak','US Dvorak'],['us:colemak','Colemak'],
+            ['gb','UK'],['de','German'],['fr','French'],['es','Spanish']];
+for(const [v,label] of KBDS){ const o=document.createElement('option'); o.value=v; o.textContent=label; $('#d-kbd').appendChild(o); }
+$('#d-kbd').value=store.get('kbd','us');
+function sendKeyboard(announce){
+  if(!ctl||ctl.readyState!=='open') return;
+  ctl.send(JSON.stringify({t:'keyboard',layout:$('#d-kbd').value}));
+  if(announce) toast('Keyboard: '+$('#d-kbd').selectedOptions[0].textContent);
+}
+$('#d-kbd').onchange=()=>{ store.set('kbd',$('#d-kbd').value); sendKeyboard(true); };
 
 /* ---------- fullscreen ---------- */
 $('#b-full').onclick=()=>{

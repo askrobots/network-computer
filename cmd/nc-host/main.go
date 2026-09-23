@@ -40,6 +40,8 @@ type host struct {
 	httpc               *http.Client // pinned when -tls-fingerprint is set
 	pairs               *pairing
 	display             displayControl
+	injOnce             sync.Once
+	inj                 input.Injector
 
 	mu       sync.Mutex
 	ws       *websocket.Conn
@@ -277,16 +279,16 @@ func (h *host) handleOffer(ctx context.Context, m proto.Message) {
 	}
 
 	restartCapture := make(chan captureOpts, 1)
-	inj, err := input.New(h.capture.Display, h.dryRun)
-	if err != nil {
-		log.Printf("[%s] input: %v (falling back to dry-run)", peer, err)
-		inj, _ = input.New(h.capture.Display, true)
-	}
+	inj := h.injector()
 	pc.OnDataChannel(func(dc *webrtc.DataChannel) {
 		log.Printf("[%s] data channel %q", peer, dc.Label())
 		dc.OnMessage(func(msg webrtc.DataChannelMessage) {
 			var ev proto.InputEvent
 			if err := json.Unmarshal(msg.Data, &ev); err != nil {
+				return
+			}
+			if ev.T == "keyboard" {
+				go setKeyboard(ev.Layout)
 				return
 			}
 			if ev.T == "display" {
@@ -410,3 +412,19 @@ func hostname() string {
 }
 
 var _ = media.Sample{}
+
+// injector creates the virtual keyboard and mouse once per host process and
+// reuses them for every session: devices created per connection were never
+// closed, and each new keyboard came up with the default layout.
+func (h *host) injector() input.Injector {
+	h.injOnce.Do(func() {
+		inj, err := input.New(h.capture.Display, h.dryRun)
+		if err != nil {
+			log.Printf("input: %v (falling back to dry-run)", err)
+			inj, _ = input.New(h.capture.Display, true)
+		}
+		h.inj = inj
+		runInputHook()
+	})
+	return h.inj
+}

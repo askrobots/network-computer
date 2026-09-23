@@ -39,7 +39,7 @@ type Config struct {
 // a packed binary form comes later. Coordinates are normalised 0..1 across the
 // captured display so the client never needs to know the host resolution.
 type InputEvent struct {
-	T    string  `json:"t"`              // mm, mr, md, mu, wh, kd, ku, display
+	T    string  `json:"t"`              // mm, mr, md, mu, wh, kd, ku, display, keyboard
 	X    float64 `json:"x,omitempty"`    // mm: absolute normalised position
 	Y    float64 `json:"y,omitempty"`    //
 	DX   float64 `json:"dx,omitempty"`   // mr: relative move in pixels; wh: scroll delta in pixels
@@ -49,4 +49,8 @@ type InputEvent struct {
 	W    int     `json:"w,omitempty"`    // display: requested screen width in pixels
 	H    int     `json:"h,omitempty"`    // display: requested screen height
 	S    float64 `json:"s,omitempty"`    // display: UI scale, 1 = 100%
+	// keyboard: the client's layout, e.g. "us", "us:dvorak". Keys travel as
+	// physical positions, so the host must turn them into characters with the
+	// same layout the client uses.
+	Layout string `json:"layout,omitempty"`
 }

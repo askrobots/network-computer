@@ -37,6 +37,7 @@ echo "browser + default apps"
 check "Firefox from Mozilla (not snap)"  sh -c 'dpkg-query -W -f="\${Version}" firefox | grep -q build'
 check "https opens Firefox"              sh -c '[ "$(xdg-mime query default x-scheme-handler/https)" = firefox.desktop ]'
 check "xfce WebBrowser helper = firefox" has /etc/xdg/xfce4/helpers.rc '^WebBrowser=firefox'
+check "keyboard layout tools installed"  sh -c 'command -v nc-keyboard && command -v nc-input-hook && command -v setxkbmap && command -v xinput'
 check "screen resize helper installed"   sh -c 'command -v nc-display && command -v cvt && command -v xrandr'
 check "xdotool installed"                command -v xdotool
 
@@ -60,6 +61,9 @@ if [ -n "$NC_DOMAIN" ]; then
   check "reports secure mode"             sh -c 'curl -sf -X POST --max-time 10 "https://$NC_DOMAIN/auth" -d "{\"user\":\"nc\",\"password\":\"$NC_PASSWORD\"}" | grep -q "\"mode\":\"secure\""'
   check "local host listener (loopback)"  sh -c 'curl -sf -o /dev/null -u "nc:$NC_PASSWORD" http://127.0.0.1:8765/hosts'
   check "firewall allows 80,443/tcp"      sh -c 'ufw status | grep -q "^80/tcp" && ufw status | grep -q "^443/tcp"'
+fi
+if [ -n "$NC_KEYBOARD" ]; then
+  check "desktop layout is $NC_KEYBOARD" sh -c 'v=${NC_KEYBOARD#*:}; [ "$v" = "$NC_KEYBOARD" ] && v=""; DISPLAY=:0 setxkbmap -query | grep -q "^layout: *${NC_KEYBOARD%%:*}" && { [ -z "$v" ] || DISPLAY=:0 setxkbmap -query | grep -q "^variant: *$v"; }'
 fi
 echo "desktop user"
 check "desktop runs as '$NC_DESK_USER', not root" sh -c 'pgrep -u "$NC_DESK_USER" -x xfce4-session && ! pgrep -u root -x xfce4-session'

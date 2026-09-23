@@ -66,6 +66,8 @@ NC_HOST_NAME=${NC_HOST_NAME:-nc}
 # The desktop account (not root). Recorded like the others.
 [ -n "$NC_DESK_USER" ] || NC_DESK_USER=$(envget NC_DESK_USER)
 NC_DESK_USER=${NC_DESK_USER:-user}
+# Keyboard layout for the desktop, e.g. us:dvorak. Clients also set it on connect.
+[ -n "$NC_KEYBOARD" ] || NC_KEYBOARD=$(envget NC_KEYBOARD)
 
 # What each service depends on. apply.sh restarts a running service only when
 # one of these changed, so re-provisioning takes effect without killing the
@@ -134,6 +136,7 @@ envset NC_PUBLIC_IP "$NC_PUBLIC_IP"
 envset NC_HOST_NAME "$NC_HOST_NAME"
 envset NC_DOMAIN "$NC_DOMAIN"
 envset NC_DESK_USER "$NC_DESK_USER"
+[ -z "$NC_KEYBOARD" ] || envset NC_KEYBOARD "$NC_KEYBOARD"
 
 echo ">> desktop user ($NC_DESK_USER)"
 if ! id "$NC_DESK_USER" >/dev/null 2>&1; then

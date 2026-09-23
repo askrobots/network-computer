@@ -39,6 +39,7 @@ func main() {
 	tlsFP := flag.String("tls-fingerprint", os.Getenv("NC_TLS_FP"), "pin the rendezvous certificate by SHA-256 (env NC_TLS_FP)")
 	pair := flag.String("pair", os.Getenv("NC_PAIR"), "pairing token from an earlier connection, used instead of the PIN (env NC_PAIR)")
 	sendInput := flag.Bool("input", false, "send a few test input events over the data channel")
+	keyboard := flag.String("keyboard", "", "tell the host this client's keyboard layout over the control channel, e.g. us:dvorak")
 	display := flag.String("display", "", "ask the host for a screen size and scale over the control channel, e.g. 1600x900@1.5")
 	micTone := flag.Int("mic-tone", 0, "send a sine tone of this frequency (Hz) as the probe's microphone, to test mic passthrough")
 	flag.Parse()
@@ -115,6 +116,14 @@ func main() {
 		pc.AddTransceiverFromKind(webrtc.RTPCodecTypeAudio, webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionRecvonly})
 	}
 	dc, _ := pc.CreateDataChannel("input", nil)
+	if *keyboard != "" {
+		kc, _ := pc.CreateDataChannel("control", nil)
+		kc.OnOpen(func() {
+			b, _ := json.Marshal(proto.InputEvent{T: "keyboard", Layout: *keyboard})
+			kc.Send(b)
+			log.Printf("told the host: keyboard %s", *keyboard)
+		})
+	}
 	if *display != "" {
 		var w, hgt int
 		scale := 1.0

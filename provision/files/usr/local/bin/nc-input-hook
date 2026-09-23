@@ -1,0 +1,13 @@
+#!/bin/sh
+# Apply the desk's keyboard layout to every keyboard on the display.
+# nc-host runs this after creating its virtual keyboard; nc-keyboard runs it
+# after a change. The client sends physical key positions, and X turns them
+# into characters with this layout, so it must match the client's keyboard.
+. /etc/nc/env 2>/dev/null || exit 0
+[ -n "$NC_KEYBOARD" ] || exit 0
+L=${NC_KEYBOARD%%:*}; V=${NC_KEYBOARD#*:}; [ "$V" = "$NC_KEYBOARD" ] && V=""
+export DISPLAY=:0
+setxkbmap -layout "$L" -variant "$V"
+for id in $(xinput list 2>/dev/null | awk '/slave  keyboard/ { if (match($0, /id=[0-9]+/)) print substr($0, RSTART+3, RLENGTH-3) }'); do
+  setxkbmap -device "$id" -layout "$L" -variant "$V" 2>/dev/null || true
+done
