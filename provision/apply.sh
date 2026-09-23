@@ -9,6 +9,10 @@
 set -e
 cd "$(dirname "$0")"
 export DEBIAN_FRONTEND=noninteractive
+# A fresh cloud image runs its own first-boot package updates; wait for them,
+# and make every apt call wait for the dpkg lock instead of failing on it.
+if command -v cloud-init >/dev/null 2>&1; then cloud-init status --wait >/dev/null 2>&1 || true; fi
+APT="apt-get -o DPkg::Lock::Timeout=600"
 GO_VERSION=1.27.1
 NC_PUBLIC_IP=${NC_PUBLIC_IP:-$(curl -s -4 ifconfig.me)}
 # ---- the desk ---------------------------------------------------------------
@@ -79,16 +83,16 @@ snapshot() { for s in xorg desktop audio rendezvous host; do echo "$s $(cat $(de
 BEFORE=$(snapshot)
 
 echo ">> packages"
-apt-get update -q
-grep -vE '^\s*#|^\s*$' packages.txt | xargs apt-get install -y -q
+$APT update -q
+grep -vE '^\s*#|^\s*$' packages.txt | xargs $APT install -y -q
 
 echo ">> Firefox (real deb from Mozilla, not the snap stub)"
 install -d -m 0755 /etc/apt/keyrings
 curl -fsSL https://packages.mozilla.org/apt/repo-signing-key.gpg -o /etc/apt/keyrings/packages.mozilla.org.asc
 echo "deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.asc] https://packages.mozilla.org/apt mozilla main" > /etc/apt/sources.list.d/mozilla.list
 printf 'Package: *\nPin: origin packages.mozilla.org\nPin-Priority: 1000\n' > /etc/apt/preferences.d/mozilla
-apt-get update -q
-apt-get install -y -q --allow-downgrades firefox
+$APT update -q
+$APT install -y -q --allow-downgrades firefox
 
 echo ">> config files"
 cp -a files/etc/. /etc/

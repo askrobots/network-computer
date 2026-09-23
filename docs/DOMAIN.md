@@ -59,6 +59,7 @@ to set up beyond moving the domain's DNS.
 |---|---|---|
 | Build + DNS + cert in one go | `NC_DOMAIN=nc.example.com infra/create-droplet.sh` | creates the droplet, points the A record at it (ttl 60), provisions with the domain |
 | Point the name at the current droplet | `infra/droplet.sh dns nc.example.com` | creates or updates the one A record |
+| Take the computer down | `infra/droplet.sh down` | parks the record at 127.0.0.1 (ttl 60), destroys the computer, keeps the desk |
 | Turn HTTPS on for an existing box | `NC_DOMAIN=nc.example.com infra/droplet.sh provision` | records the domain in `/etc/nc/env`, restarts the rendezvous |
 | Any DigitalOcean DNS name, any IP | `infra/dns-point.sh nc.example.com 203.0.113.5` | the building block the others use |
 
@@ -70,6 +71,16 @@ the machine. Firewall rules for 80/443 are opened by provisioning.
 `provision/verify.sh` checks the result: the name resolves to this machine, the
 certificate is valid without `-k`, the server reports `secure`, and the loopback
 listener answers.
+
+### Why park the record instead of deleting it
+
+When a computer goes away its IP returns to DigitalOcean's pool and may be given to someone
+else, so the name must stop pointing there. Deleting the record looks right but backfires:
+resolvers cache "no such name" for the zone's negative TTL, 30 minutes on DigitalOcean, and
+clients that auto-reconnect while the desk is down plant that answer in their resolvers.
+After the next `up` they cannot reach the desk for up to half an hour. Parking the record at
+127.0.0.1 with a 60-second TTL points at nothing anyone else can own, and is re-checked
+within a minute once `up` points it at the new computer.
 
 ## Without a domain
 

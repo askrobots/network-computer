@@ -34,8 +34,8 @@ case "$1" in
     DID=$(id); [ -n "$DID" ] || { echo "no computer is up; desk $VOL is untouched"; exit 0; }
     IP=$(ip)
     DOMAIN=${NC_DOMAIN:-$(ssh -o ConnectTimeout=5 root@"$IP" 'sed -n "s/^NC_DOMAIN=//p" /etc/nc/env' 2>/dev/null || true)}
-    # DNS first, so the name never points at an IP that is about to be released
-    [ -z "$DOMAIN" ] || sh ./dns-remove.sh "$DOMAIN" "$IP"
+    # park DNS first, so the name never points at an IP that is about to be released
+    [ -z "$DOMAIN" ] || sh ./dns-park.sh "$DOMAIN" "$IP"
     doctl compute droplet delete "$DID" --force
     echo "$NAME destroyed (billing stopped); desk $VOL kept" ;;
   status)

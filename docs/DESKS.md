@@ -58,8 +58,9 @@ Downloads and caches stay local and vanish on rebuild, like a real hot desk. The
 holds the desk's identity (login password, PIN, pairing secret, certificate cache) and API
 keys, generated on first boot and reused after, so rebuilds keep pairings and never hit the
 Let's Encrypt weekly limit. Models are downloaded on demand. Scripts never delete a volume;
-destroying a computer detaches it, and also removes the domain's DNS record so no dangling
-record can point at a reassigned IP. A snapshot of a 1 GB desk is about $0.06/month.
+destroying a computer detaches it, and parks the domain's DNS record at 127.0.0.1 (ttl 60)
+rather than deleting it: nothing can then point at a reassigned IP, and resolvers do not cache
+a "no such name" answer for the zone's 30-minute negative TTL. A snapshot of a 1 GB desk is about $0.06/month.
 
 On-computer AI: whisper.cpp (speech-to-text) and Piper (voice) are practical on CPU with
 about 0.5 GB of models; 4 vCPUs keep up with speech. A small local model (Llama 3.2 3B,
