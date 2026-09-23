@@ -75,6 +75,16 @@
   .bar-btn:hover{border-color:var(--accent)}
   .bar-btn.active{background:var(--accent);border-color:var(--accent)}
 
+  /* mic panel: which microphone, and a live level so "it hears me" is obvious */
+  #micpanel{position:absolute;top:calc(56px + env(safe-area-inset-top,0px));left:50%;transform:translateX(-50%);
+    z-index:16;display:none;align-items:center;gap:10px;padding:8px 12px;background:#12151acc;
+    border:1px solid var(--line);border-radius:10px;backdrop-filter:blur(8px);font-size:12.5px}
+  #micpanel.on{display:flex}
+  #micpanel select{max-width:220px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:4px 6px}
+  #micmeter{width:120px;height:8px;border-radius:4px;background:#0c0f13;overflow:hidden}
+  #micmeter i{display:block;height:100%;width:0;background:var(--accent2);transition:width .08s linear}
+  #micquiet{color:var(--warn);display:none}
+
   /* stats card */
   #stats{position:absolute;top:60px;top:calc(56px + env(safe-area-inset-top,0px));left:12px;z-index:15;
     background:#12151acc;border:1px solid var(--line);border-radius:10px;padding:10px 12px;
@@ -171,6 +181,12 @@
   </div>
 
   <div id="stats"></div>
+  <div id="micpanel">
+    <span>🎤</span>
+    <select id="mic-dev" title="Microphone"></select>
+    <div id="micmeter"><i></i></div>
+    <span id="micquiet">not hearing you — pick another mic</span>
+  </div>
   <div id="graphs">
     <div class="g"><div class="g-head"><span>frame rate</span><b id="gv-fps">0 fps</b></div><canvas id="gc-fps"></canvas></div>
     <div class="g"><div class="g-head"><span>bitrate</span><b id="gv-mbps">0 Mb/s</b></div><canvas id="gc-mbps"></canvas></div>
@@ -493,22 +509,68 @@ function stopTimers(){clearInterval(statsTimer);clearInterval(watchdog);}
 /* ---------- microphone ---------- */
 // The browser only allows microphone access on https (or localhost), so on a
 // plain-http rendezvous this explains why instead of failing silently.
+let micCtx=null, micRaf=0, quietSince=0;
+async function openMic(deviceId){
+  const c={echoCancellation:true,noiseSuppression:true,autoGainControl:true};
+  if(deviceId) c.deviceId={exact:deviceId};
+  return navigator.mediaDevices.getUserMedia({audio:c});
+}
+async function fillMicList(current){
+  const sel=$('#mic-dev'), devs=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='audioinput');
+  sel.innerHTML='';
+  for(const d of devs){ const o=document.createElement('option'); o.value=d.deviceId; o.textContent=d.label||'microphone'; sel.appendChild(o); }
+  if(current) sel.value=current;
+}
+function startMeter(stream){
+  stopMeter();
+  const AC=window.AudioContext||window.webkitAudioContext; micCtx=new AC();
+  const an=micCtx.createAnalyser(); an.fftSize=1024;
+  micCtx.createMediaStreamSource(stream).connect(an);
+  const buf=new Float32Array(an.fftSize), bar=$('#micmeter i');
+  quietSince=performance.now();
+  (function tick(){
+    an.getFloatTimeDomainData(buf);
+    let peak=0; for(const v of buf) peak=Math.max(peak,Math.abs(v));
+    const db=20*Math.log10(peak||1e-9);                 // -inf..0 dBFS
+    bar.style.width=Math.max(0,Math.min(100,(db+60)/60*100))+'%';   // -60 dB = empty, 0 = full
+    if(db>-40) quietSince=performance.now();
+    $('#micquiet').style.display = performance.now()-quietSince>4000 ? 'inline':'none';
+    micRaf=requestAnimationFrame(tick);
+  })();
+}
+function stopMeter(){ cancelAnimationFrame(micRaf); if(micCtx){ micCtx.close(); micCtx=null; } }
+async function useMic(deviceId){
+  const next=await openMic(deviceId);
+  const track=next.getAudioTracks()[0];
+  await audioTx.sender.replaceTrack(track);
+  if(micStream) micStream.getTracks().forEach(t=>t.stop());
+  micStream=next;
+  const id=track.getSettings().deviceId||deviceId;
+  store.set('micdev',id||'');
+  await fillMicList(id);
+  startMeter(next);
+}
 async function setMic(on){
   const btn=$('#b-mic');
   if(on){
     if(!window.isSecureContext){ toast('Microphone needs secure mode (https)'); return; }
     try{
-      micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
-      await audioTx.sender.replaceTrack(micStream.getAudioTracks()[0]);
-      btn.classList.add('active'); toast('Microphone on');
-    }catch(e){ toast('Microphone blocked: '+e.message); }
+      await useMic(store.get('micdev','')||undefined);
+      btn.classList.add('active'); $('#micpanel').classList.add('on'); toast('Microphone on');
+    }catch(e){
+      // a remembered device may be gone (unplugged): fall back to the default once
+      if(store.get('micdev','')){ store.set('micdev',''); return setMic(true); }
+      toast('Microphone blocked: '+e.message);
+    }
   }else{
+    stopMeter();
     if(audioTx) await audioTx.sender.replaceTrack(null);
     if(micStream){ micStream.getTracks().forEach(t=>t.stop()); micStream=null; }
-    btn.classList.remove('active');
+    btn.classList.remove('active'); $('#micpanel').classList.remove('on');
   }
 }
 $('#b-mic').onclick=()=>setMic(!micStream);
+$('#mic-dev').onchange=e=>useMic(e.target.value).catch(err=>toast('Could not switch: '+err.message));
 
 /* ---------- fullscreen ---------- */
 $('#b-full').onclick=()=>{

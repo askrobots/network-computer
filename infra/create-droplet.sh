@@ -1,12 +1,13 @@
 #!/bin/sh
 # Create one Ubuntu droplet and provision it from provision/.
-# Usage: [NC_DOMAIN=nc.example.com] infra/create-droplet.sh [name] [region] [size]
+# Usage: [NC_DOMAIN=nc.example.com] [NC_HOST_NAME=nc] infra/create-droplet.sh [name] [region] [size]
+# The droplet name is the cloud resource; NC_HOST_NAME (default "nc") is what clients see.
 #
 # With NC_DOMAIN set and that domain's DNS on DigitalOcean, the A record is
 # pointed at the new droplet before provisioning, so the host comes up with a
 # real Let's Encrypt certificate: one command, https, no fingerprints.
 set -e
-NAME=${1:-nc-test}; REGION=${2:-nyc3}; SIZE=${3:-s-2vcpu-4gb}
+NAME=${1:-nc}; REGION=${2:-nyc3}; SIZE=${3:-s-2vcpu-4gb}
 IMAGE=ubuntu-24-04-x64
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 
@@ -32,4 +33,4 @@ fi
 echo "waiting for ssh..."
 for i in $(seq 1 30); do ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 root@"$IP" true 2>/dev/null && break; sleep 5; done
 
-NC_DOMAIN=$NC_DOMAIN sh "$(dirname "$0")/provision-host.sh" "$IP" "$NAME"
+NC_DOMAIN=$NC_DOMAIN sh "$(dirname "$0")/provision-host.sh" "$IP" "${NC_HOST_NAME:-nc}"

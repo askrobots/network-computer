@@ -8,7 +8,7 @@
 # NC_DOMAIN turns on a Let's Encrypt certificate; its A record must already
 # point at <ip> (infra/dns-point.sh does that for DigitalOcean DNS).
 set -e
-IP=$1; NAME=${2:-cloudbox}; USER=${3:-root}
+IP=$1; NAME=${2:-nc}; USER=${3:-root}
 [ -n "$IP" ] || { echo "usage: provision-host.sh <ip> [host-name] [ssh-user]"; exit 1; }
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 

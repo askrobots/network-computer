@@ -17,7 +17,7 @@ NC_PUBLIC_IP=${NC_PUBLIC_IP:-$(curl -s -4 ifconfig.me)}
 if [ -z "$NC_HOST_NAME" ] && [ -f /etc/nc/env ]; then
   NC_HOST_NAME=$(sed -n 's/^NC_HOST_NAME=//p' /etc/nc/env)
 fi
-NC_HOST_NAME=${NC_HOST_NAME:-cloudbox}
+NC_HOST_NAME=${NC_HOST_NAME:-nc}
 # Optional public hostname for a real (Let's Encrypt) certificate. Browsers only
 # grant the microphone to secure pages, so this is what makes browser mic work.
 if [ -z "$NC_DOMAIN" ] && [ -f /etc/nc/env ]; then
