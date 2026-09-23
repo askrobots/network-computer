@@ -40,6 +40,7 @@ type host struct {
 	httpc               *http.Client // pinned when -tls-fingerprint is set
 	pairs               *pairing
 	display             displayControl
+	filesDir            string
 	injOnce             sync.Once
 	inj                 input.Injector
 
@@ -71,6 +72,8 @@ func main() {
 	stateDir := flag.String("state-dir", defaultHostStateDir(), "where the pairing secret is kept")
 	resetPairs := flag.Bool("reset-pairings", false, "rotate the pairing secret, revoking every paired client")
 	tlsFP := flag.String("tls-fingerprint", os.Getenv("NC_TLS_FP"), "pin the rendezvous certificate by SHA-256 (env NC_TLS_FP); for a self-signed rendezvous")
+	filesDir := flag.String("files-dir", "", "save files dropped on the client window here ('' = refuse them); e.g. the desk user's Desktop")
+	sendSocket := flag.String("send-socket", "", "unix socket where nc-send hands over files for the connected client ('' = off)")
 	dryRun := flag.Bool("dry-run", false, "log input events instead of injecting them")
 	flag.Parse()
 
@@ -78,7 +81,10 @@ func main() {
 		*pin = randomPIN()
 	}
 	log.Printf("host PIN: %s   (clients must enter this to connect)", *pin)
-	h := &host{name: *name, audio: *audio, mic: *mic, dryRun: *dryRun, sessions: map[string]*session{}, user: *user, password: *password, pin: *pin}
+	h := &host{name: *name, audio: *audio, mic: *mic, dryRun: *dryRun, sessions: map[string]*session{}, user: *user, password: *password, pin: *pin, filesDir: *filesDir}
+	if *sendSocket != "" {
+		go h.serveSend(*sendSocket)
+	}
 	h.httpc = tlspin.Client(*tlsFP)
 	pairs, err := loadPairing(*name, *stateDir, *resetPairs)
 	if err != nil {
@@ -283,6 +289,10 @@ func (h *host) handleOffer(ctx context.Context, m proto.Message) {
 	clip := newClipSync()
 	pc.OnDataChannel(func(dc *webrtc.DataChannel) {
 		log.Printf("[%s] data channel %q", peer, dc.Label())
+		if dc.Label() == "file" {
+			receiveFile(peer, dc, h.filesDir)
+			return
+		}
 		if dc.Label() == "control" {
 			clip.dc = dc
 			dc.OnOpen(func() { go clip.run(sctx) })

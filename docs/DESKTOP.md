@@ -7,7 +7,8 @@ Plan, 2026-09-23. The streaming works; this is about the network computer feelin
 
 The most noticeable gap in daily use: copy on the Mac, paste on the desk, and back.
 
-**Status: text works in the web client (2026-09-23).** Ctrl/⌘+V puts this device's
+**Status: text works in the web client (2026-09-23).** The toolbar's 📋↑ / 📋↓ send or
+fetch the clipboard without a keystroke (so the desk's right-click → Paste works too). Ctrl/⌘+V puts this device's
 clipboard on the desk and then pastes; Ctrl/⌘+C or X on the desk comes back to this device.
 On a Mac, ⌘ acts as Ctrl on the desk (a checkbox in the 🖥️ panel turns that off). The
 host side uses `xclip` on Linux and `pbcopy`/`pbpaste` on macOS; Windows hosts don't have it
@@ -36,8 +37,11 @@ mapping (on by default for Mac clients) fixes most of it.
 
 Three layers, each a step further:
 
-- **Browser client:** drag a file onto the window and it lands in `Documents`; downloads on
-  the desk can be sent back to the device. Chunked over the `control` channel.
+- **Browser client (works, 2026-09-23):** drop files on the window and they land on the
+  desk's Desktop (on the desk volume; refused if it would not fit). On the desk, right-click
+  a file → **Send to my device** (or `nc-send FILE...`) and a 📥 button appears in the
+  browser; click it to save. Each file has its own reliable data channel. Tested with
+  `nc-probe -send-file` / `-recv-dir`: 30 MB identical both ways. Folders: zip them first.
 - **Native desktop client (Flutter, macOS/Windows/Linux):** a real **shared folder** in both
   directions, which a browser cannot do.
   - Desk to device: the desk's `Documents` appears as a folder on the Mac. macOS mounts

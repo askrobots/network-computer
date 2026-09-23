@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -43,6 +44,8 @@ func main() {
 	keyboard := flag.String("keyboard", "", "tell the host this client's keyboard layout over the control channel, e.g. us:dvorak")
 	display := flag.String("display", "", "ask the host for a screen size and scale over the control channel, e.g. 1600x900@1.5")
 	clip := flag.String("clip", "", "put this text (or @file's contents) on the host clipboard, then log what the host sends back; \"-\" only watches, \"?\" asks for the host clipboard as it is")
+	sendPath := flag.String("send-file", "", "send this file to the host the way a drop on the web client does")
+	recvDir := flag.String("recv-dir", "", "accept files the host sends (nc-send) and save them here")
 	micTone := flag.Int("mic-tone", 0, "send a sine tone of this frequency (Hz) as the probe's microphone, to test mic passthrough")
 	flag.Parse()
 
@@ -144,6 +147,12 @@ func main() {
 
 	if *clip != "" {
 		watchClipboard(pc, *clip)
+	}
+	if *sendPath != "" {
+		probeSendFile(pc, *sendPath)
+	}
+	if *recvDir != "" {
+		probeRecvFiles(pc, *recvDir)
 	}
 
 	connected := make(chan struct{})
@@ -450,5 +459,61 @@ func watchClipboard(pc *webrtc.PeerConnection, arg string) {
 			}
 			log.Printf("clipboard: host sent %d bytes: %q", len(t), preview)
 		}
+	})
+}
+
+// probeSendFile sends a file on its own "file" channel: header, pieces, "end".
+func probeSendFile(pc *webrtc.PeerConnection, path string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		log.Fatalf("-send-file: %v", err)
+	}
+	fc, _ := pc.CreateDataChannel("file", nil)
+	fc.OnOpen(func() {
+		start := time.Now()
+		b, _ := json.Marshal(map[string]any{"name": filepath.Base(path), "size": len(data)})
+		fc.SendText(string(b))
+		for i := 0; i < len(data); i += 16 << 10 {
+			for fc.BufferedAmount() > 4<<20 {
+				time.Sleep(5 * time.Millisecond)
+			}
+			fc.Send(data[i:min(i+16<<10, len(data))])
+		}
+		fc.SendText("end")
+		log.Printf("file: sent %d bytes in %v", len(data), time.Since(start).Round(time.Millisecond))
+	})
+	fc.OnMessage(func(m webrtc.DataChannelMessage) { log.Printf("file: host says %q", m.Data) })
+}
+
+// probeRecvFiles saves files the host pushes, answering like the web client.
+func probeRecvFiles(pc *webrtc.PeerConnection, dir string) {
+	pc.OnDataChannel(func(dc *webrtc.DataChannel) {
+		if dc.Label() != "file" {
+			return
+		}
+		var name string
+		var size int64
+		var buf []byte
+		dc.OnMessage(func(m webrtc.DataChannelMessage) {
+			switch {
+			case m.IsString && name == "":
+				var h struct {
+					Name string `json:"name"`
+					Size int64  `json:"size"`
+				}
+				json.Unmarshal(m.Data, &h)
+				name, size = filepath.Base(h.Name), h.Size
+			case m.IsString && string(m.Data) == "end":
+				if int64(len(buf)) != size {
+					dc.SendText(fmt.Sprintf("error: got %d of %d", len(buf), size))
+					return
+				}
+				os.WriteFile(filepath.Join(dir, name), buf, 0o644)
+				dc.SendText("ok " + name)
+				log.Printf("file: received %s (%d bytes)", name, len(buf))
+			case !m.IsString:
+				buf = append(buf, m.Data...)
+			}
+		})
 	})
 }

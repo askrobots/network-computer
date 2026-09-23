@@ -167,6 +167,14 @@ if [ -n "$DESK" ]; then
     echo "# API keys for this desk, e.g. ANTHROPIC_API_KEY=... (lives on the desk, 0600)" > /desk/secrets/env
   fi
 fi
+# the file manager's "Send to my device" (nc-send); added once, the user's other actions kept
+UCA="$UHOME/.config/Thunar/uca.xml"
+if ! grep -q 'nc-send' "$UCA" 2>/dev/null; then
+  runuser -u "$NC_DESK_USER" -- mkdir -p "$UHOME/.config/Thunar"
+  [ -f "$UCA" ] || { cp /etc/xdg/Thunar/uca.xml "$UCA" 2>/dev/null || printf '<?xml version="1.0" encoding="UTF-8"?>\n<actions>\n</actions>\n' > "$UCA"; }
+  awk '/<\/actions>/{print "<action><icon>document-send</icon><name>Send to my device</name><submenu></submenu><unique-id>nc-send</unique-id><command>nc-send %F</command><description>Download on the device you are connected from</description><range>*</range><patterns>*</patterns><other-files/><text-files/><image-files/><audio-files/><video-files/></action>"}{print}' "$UCA" > "$UCA.new" && mv "$UCA.new" "$UCA"
+  chown "$NC_DESK_USER:$NC_DESK_USER" "$UCA"
+fi
 # the desktop session runs as the desk user
 install -d /etc/systemd/system/nc-desktop.service.d
 cat > /etc/systemd/system/nc-desktop.service.d/user.conf <<EOT

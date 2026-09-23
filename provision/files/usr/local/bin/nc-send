@@ -1,0 +1,17 @@
+#!/bin/sh
+# Send files to the device you are connected from; it offers each as a download.
+#   nc-send FILE...        (also the file manager's right-click "Send to my device")
+SOCK=${NC_SEND_SOCKET:-/run/nc-host/send.sock}
+say() { echo "$1"; command -v notify-send >/dev/null && notify-send -i document-send "Send to my device" "$1"; }
+[ $# -gt 0 ] || { echo "usage: nc-send FILE..."; exit 2; }
+[ -S "$SOCK" ] || { say "nc-host is not running here"; exit 1; }
+rc=0
+for f in "$@"; do
+  if [ ! -f "$f" ] || [ ! -r "$f" ]; then say "$(basename "$f"): not a readable file (folders: zip them first)"; rc=1; continue; fi
+  name=$(basename "$f")
+  q=$(python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "$name")
+  out=$(curl -sS --unix-socket "$SOCK" -T "$f" -w '\n%{http_code}' "http://desk/send?name=$q" 2>&1)
+  code=$(echo "$out" | tail -n 1); body=$(echo "$out" | sed '$d')
+  if [ "$code" = 200 ]; then say "$body"; else say "$name: ${body:-not sent}"; rc=1; fi
+done
+exit $rc

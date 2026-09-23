@@ -135,6 +135,14 @@
     border-radius:50%;animation:spin 1s linear infinite}
   @keyframes spin{to{transform:rotate(360deg)}}
   #disppanel label{display:flex;align-items:center;gap:4px;white-space:nowrap}
+  #dropzone{position:fixed;inset:0;z-index:40;display:none;align-items:center;justify-content:center;
+    background:rgba(20,30,60,.55);border:3px dashed #8ab4ff;color:#fff;font-size:22px;pointer-events:none}
+  #dropzone.on{display:flex}
+  #downloads{position:fixed;right:12px;bottom:calc(12px + env(safe-area-inset-bottom,0px));z-index:30;display:none;
+    flex-direction:column;gap:6px;max-width:min(360px,80vw)}
+  #downloads.on{display:flex}
+  #downloads a{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;color:inherit;
+    text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;box-shadow:0 4px 14px rgba(0,0,0,.35)}
   #clipbox{position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0}
 </style>
 
@@ -203,6 +211,8 @@
     <select id="d-kbd" title="The layout of the keyboard on this device"></select>
     <label id="d-cmdl" title="⌘C, ⌘V, ⌘Z… work as Ctrl shortcuts on the desk" hidden><input type="checkbox" id="d-cmd"> ⌘ = Ctrl</label>
   </div>
+  <div id="dropzone">Drop to send to the desk's Desktop</div>
+  <div id="downloads" title="Files sent from the desk: click to save"></div>
   <textarea id="clipbox" aria-hidden="true" tabindex="-1"></textarea>
   <div id="micpanel">
     <span>🎤</span>
@@ -362,6 +372,7 @@ async function openPeer(){
   // reliable + ordered: requests that must not be dropped (screen size, later files and clipboard)
   ctl=pc.createDataChannel('control');
   ctl.onmessage=onCtl;
+  pc.ondatachannel=e=>{ if(e.channel.label==='file') receiveFile(e.channel); };
   ctl.onopen=()=>{ lastDisplay=null; sendDisplay(); sendKeyboard(false); };
 
   pc.ontrack=ev=>{
@@ -740,6 +751,68 @@ $('#b-clipup').onclick=async()=>{
   sendClip(text); toast('Clipboard sent to the desk');
 };
 $('#b-clipdown').onclick=()=>{ if(!ctlOpen()) return; clipAsked=true; startCopy('clipnow'); };
+/* ---------- files ---------- */
+// Each file has its own reliable channel: {"name","size"}, binary pieces,
+// "end"; the other side answers "ok <name>" or "error: <why>".
+// Drop on the window: saved on the desk's Desktop. From the desk: the file
+// manager's "Send to my device" puts a 📥 button here; click it to save.
+function fmtSize(n){ return n>=1<<30?(n/(1<<30)).toFixed(1)+' GB':n>=1<<20?(n/(1<<20)).toFixed(1)+' MB':n>=1024?Math.round(n/1024)+' KB':n+' bytes'; }
+let dragDepth=0;
+window.addEventListener('dragenter',e=>{ if(!pc||!e.dataTransfer||![...e.dataTransfer.types].includes('Files')) return; e.preventDefault(); dragDepth++; $('#dropzone').classList.add('on'); });
+window.addEventListener('dragover',e=>{ if(dragDepth) e.preventDefault(); });
+window.addEventListener('dragleave',()=>{ if(dragDepth&&--dragDepth===0) $('#dropzone').classList.remove('on'); });
+window.addEventListener('drop',async e=>{
+  if(!dragDepth) return;
+  e.preventDefault(); dragDepth=0; $('#dropzone').classList.remove('on');
+  if(!pc||pc.connectionState!=='connected'){ toast('Not connected'); return; }
+  const files=[...e.dataTransfer.files];
+  for(const f of files){
+    if(!f.size&&!f.type){ toast(f.name+': folders are not supported yet (zip it)'); continue; }
+    try{ await sendFile(f); }catch(err){ toast(f.name+': '+err.message); }
+  }
+});
+async function sendFile(file){
+  const ch=pc.createDataChannel('file'); ch.binaryType='arraybuffer';
+  await new Promise((res,rej)=>{ ch.onopen=res; ch.onerror=()=>rej(new Error('channel failed')); });
+  let answer=null; const answered=new Promise(res=>{ ch.onmessage=e=>{ answer=String(e.data); res(answer); }; });
+  ch.bufferedAmountLowThreshold=1<<20;
+  ch.send(JSON.stringify({name:file.name,size:file.size}));
+  const PIECE=16384, READ=PIECE*32; let off=0, shown=0;
+  while(off<file.size&&answer===null){
+    if(ch.bufferedAmount>4<<20) await new Promise(r=>{ ch.onbufferedamountlow=r; });
+    const buf=await file.slice(off,off+READ).arrayBuffer();
+    for(let i=0;i<buf.byteLength;i+=PIECE) ch.send(buf.slice(i,i+PIECE));
+    off+=buf.byteLength;
+    if(Date.now()-shown>400){ shown=Date.now(); toast(`Sending ${file.name}: ${Math.round(off*100/file.size)}%`); }
+  }
+  if(answer===null) ch.send('end');
+  const r=await answered; ch.close();
+  if(r.startsWith('ok ')) toast(`On the desk's Desktop: ${r.slice(3)}`);
+  else throw new Error(r.replace(/^error: /,''));
+}
+function receiveFile(ch){
+  ch.binaryType='arraybuffer';
+  let hdr=null, parts=[], got=0, shown=0;
+  ch.onmessage=e=>{
+    if(typeof e.data==='string'){
+      if(!hdr){ try{ hdr=JSON.parse(e.data); }catch(err){ ch.send('error: bad header'); } return; }
+      if(e.data==='end'){
+        if(got!==hdr.size){ ch.send(`error: got ${got} of ${hdr.size} bytes`); return; }
+        offerDownload(hdr.name, new Blob(parts)); parts=[]; ch.send('ok '+hdr.name);
+      }
+      return;
+    }
+    parts.push(e.data); got+=e.data.byteLength;
+    if(hdr&&hdr.size>1<<20&&Date.now()-shown>400){ shown=Date.now(); toast(`Receiving ${hdr.name}: ${Math.round(got*100/hdr.size)}%`); }
+  };
+}
+function offerDownload(name,blob){
+  const box=$('#downloads'), a=document.createElement('a'), url=URL.createObjectURL(blob);
+  a.href=url; a.download=name; a.textContent=`📥 ${name} · ${fmtSize(blob.size)}`;
+  a.onclick=()=>setTimeout(()=>{ a.remove(); URL.revokeObjectURL(url); box.classList.toggle('on',box.children.length>0); },1500);
+  box.appendChild(a); box.classList.add('on');
+  toast(`From the desk: ${name} (click 📥 to save)`);
+}
 function isShortcut(e,code,...codes){ return codes.includes(code)&&(e.ctrlKey||(e.metaKey&&cmdIsCtrl()))&&!e.altKey; }
 
 /* ---------- fullscreen ---------- */
