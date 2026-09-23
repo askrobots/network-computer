@@ -5,7 +5,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -23,8 +22,8 @@ import (
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
 	"github.com/pion/webrtc/v4/pkg/media"
-	"github.com/pion/webrtc/v4/pkg/media/oggreader"
 
+	"github.com/askrobots/network-computer/internal/oggopus"
 	"github.com/askrobots/network-computer/internal/proto"
 	"github.com/askrobots/network-computer/internal/tlspin"
 )
@@ -162,6 +161,7 @@ func main() {
 		packets, bytes, frames, keyframes int
 		audioPackets, audioBytes          int
 		audioGaps                         []time.Duration // time between audio packets
+		audioTSDelta                      map[uint32]int  // RTP timestamp step -> count (960 = one 20 ms frame)
 		first                             time.Time
 	}
 	st := &stats{}
@@ -172,6 +172,8 @@ func main() {
 		if track.Kind() != webrtc.RTPCodecTypeVideo {
 			go func() {
 				var last time.Time
+				var lastTS uint32
+				st.audioTSDelta = map[uint32]int{}
 				for {
 					pkt, _, err := track.ReadRTP()
 					if err != nil {
@@ -182,6 +184,10 @@ func main() {
 						st.audioGaps = append(st.audioGaps, now.Sub(last))
 					}
 					last = now
+					if st.audioPackets > 0 {
+						st.audioTSDelta[pkt.Timestamp-lastTS]++
+					}
+					lastTS = pkt.Timestamp
 					st.audioPackets++
 					st.audioBytes += len(pkt.Payload)
 				}
@@ -303,6 +309,7 @@ func main() {
 			fmt.Printf("audio timing: gaps p10 %v, p50 %v, p90 %v, p99 %v, max %v; %.0f%% arrive <5ms apart (bursts). 20ms each = smooth\n",
 				pct(.10).Round(100*time.Microsecond), pct(.5).Round(100*time.Microsecond), pct(.9).Round(100*time.Microsecond),
 				pct(.99).Round(100*time.Microsecond), g[len(g)-1].Round(100*time.Microsecond), 100*float64(bursts)/float64(len(g)))
+			fmt.Printf("audio timestamp steps (960 = one 20 ms frame per packet): %v\n", st.audioTSDelta)
 		}
 	} else {
 		fmt.Println("audio: none received (host started without -audio-device, or nothing playing)")
@@ -357,26 +364,20 @@ func sendTone(ctx context.Context, track *webrtc.TrackLocalStaticSample, hz int)
 		return
 	}
 	defer cmd.Wait()
-	ogg, _, err := oggreader.NewWith(out)
-	if err != nil {
-		log.Printf("tone ogg: %v", err)
-		return
-	}
-	var last uint64
+	ogg := oggopus.NewReader(out)
+	next := time.Now()
 	for {
-		page, hdr, err := ogg.ParseNextPage()
+		pkt, err := ogg.Next()
 		if err != nil {
 			return
 		}
-		if bytes.HasPrefix(page, []byte("OpusTags")) {
-			continue // metadata page, not audio
-		}
-		d := time.Duration(hdr.GranulePosition-last) * time.Second / 48000
-		last = hdr.GranulePosition
-		if d <= 0 || d > 200*time.Millisecond {
+		d := oggopus.Duration(pkt)
+		if d <= 0 {
 			d = 20 * time.Millisecond
 		}
-		if err := track.WriteSample(media.Sample{Data: page, Duration: d}); err != nil {
+		time.Sleep(time.Until(next))
+		next = next.Add(d)
+		if err := track.WriteSample(media.Sample{Data: pkt, Duration: d}); err != nil {
 			return
 		}
 	}

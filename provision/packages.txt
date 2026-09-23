@@ -4,6 +4,10 @@ ffmpeg
 pulseaudio
 pulseaudio-utils
 pavucontrol
+# record and play back sound (uses ALSA; the plugin routes ALSA to pulse, so it
+# sees the phone microphone and plays to the desktop speaker)
+audacity
+libasound2-plugins
 # Headless desktop
 xserver-xorg-core
 xserver-xorg-video-dummy
