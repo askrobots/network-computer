@@ -59,11 +59,15 @@
     filter:drop-shadow(0 1px 2px rgba(0,0,0,.6))}
   #cursor.on{opacity:1}
 
-  /* top control bar, auto-hiding */
-  #bar{position:absolute;top:0;left:0;right:0;z-index:20;display:flex;align-items:center;gap:6px;
-    padding:10px 12px;padding-top:calc(10px + env(safe-area-inset-top,0px));
-    background:linear-gradient(#000c,#0000);transition:opacity .3s,transform .3s}
-  #bar.hidden{opacity:0;transform:translateY(-100%);pointer-events:none}
+  /* toolbar: compact and centred, hidden until the pointer rests against the very
+     top edge (or the handle is clicked), so the desktop's own top panel stays usable */
+  #bar{position:absolute;top:0;left:50%;transform:translate(-50%,0);z-index:20;display:flex;align-items:center;gap:6px;
+    padding:6px 8px;margin-top:env(safe-area-inset-top,0px);background:#12151ae6;border:1px solid var(--line);
+    border-top:none;border-radius:0 0 12px 12px;backdrop-filter:blur(8px);transition:opacity .25s,transform .25s}
+  #bar.hidden{opacity:0;transform:translate(-50%,-110%);pointer-events:none}
+  #bar .pill{pointer-events:none}
+  #barhandle{position:absolute;top:0;left:50%;transform:translateX(-50%);z-index:19;width:56px;height:6px;
+    margin-top:env(safe-area-inset-top,0px);border-radius:0 0 6px 6px;background:#4c8dff88;cursor:pointer}
   .pill{display:inline-flex;align-items:center;gap:7px;padding:6px 11px;background:#1c2129cc;
     border:1px solid var(--line);border-radius:20px;font-size:12.5px;backdrop-filter:blur(8px)}
   .pill.host{font-weight:600}
@@ -173,10 +177,10 @@
     <svg id="cursor" viewBox="0 0 24 24"><path d="M4 2l16 9-7 1.5L9.5 20z" fill="#fff" stroke="#000" stroke-width="1.2"/></svg>
   </div>
 
+  <div id="barhandle" title="Show the toolbar"></div>
   <div id="bar">
     <span class="pill host"><span class="dot" id="dot"></span><span id="p-host">—</span></span>
     <span class="pill" id="p-net">connecting…</span>
-    <span class="spacer"></span>
     <button class="bar-btn" id="b-display" title="Screen size and scale">🖥️</button>
     <button class="bar-btn" id="b-mic" title="Microphone">🎤</button>
     <button class="bar-btn" id="b-graphs" title="Graphs">📈</button>
@@ -629,13 +633,16 @@ window.addEventListener('resize',()=>{
 // Keys travel as physical positions (so shortcuts and special keys are exact);
 // the desktop turns them into characters with a layout, which has to be the
 // layout of the keyboard on this device. Remembered per browser.
-const KBDS=[['us','US QWERTY'],['us:dvorak','US Dvorak'],['us:colemak','Colemak'],
-            ['gb','UK'],['de','German'],['fr','French'],['es','Spanish']];
+// 'auto': this browser translates each character to the US key that makes it,
+// so QWERTY, Dvorak, Colemak... work with no setting and the desk stays US.
+// Layouts whose shifted characters differ from US set the desk layout instead.
+const KBDS=[['auto','Automatic (QWERTY, Dvorak, Colemak…)'],['gb','UK'],['de','German'],['fr','French'],['es','Spanish']];
 for(const [v,label] of KBDS){ const o=document.createElement('option'); o.value=v; o.textContent=label; $('#d-kbd').appendChild(o); }
-$('#d-kbd').value=store.get('kbd','us');
+$('#d-kbd').value=KBDS.some(k=>k[0]===store.get('kbd','auto'))?store.get('kbd','auto'):'auto';
 function sendKeyboard(announce){
   if(!ctl||ctl.readyState!=='open') return;
-  ctl.send(JSON.stringify({t:'keyboard',layout:$('#d-kbd').value}));
+  const v=$('#d-kbd').value;
+  ctl.send(JSON.stringify({t:'keyboard',layout: v==='auto' ? 'us' : v}));
   if(announce) toast('Keyboard: '+$('#d-kbd').selectedOptions[0].textContent);
 }
 $('#d-kbd').onchange=()=>{ store.set('kbd',$('#d-kbd').value); sendKeyboard(true); };
@@ -695,12 +702,34 @@ stage.addEventListener('mousedown',e=>{
 stage.addEventListener('mouseup',e=>{ if(grabbing){e.preventDefault();send({t:'mu',b:e.button});} });
 stage.addEventListener('contextmenu',e=>e.preventDefault());
 stage.addEventListener('wheel',e=>{ if(grabbing){e.preventDefault();send({t:'wh',dx:e.deltaX,dy:e.deltaY});} },{passive:false});
+// Character keys are sent as the US key that produces the same character, so
+// the desktop (US QWERTY) types what this device's layout typed. Other keys
+// (Enter, arrows, F-keys, modifiers) go by physical position.
+const US_CODE={};
+'abcdefghijklmnopqrstuvwxyz'.split('').forEach(c=>{ US_CODE[c]=US_CODE[c.toUpperCase()]='Key'+c.toUpperCase(); });
+'0123456789'.split('').forEach(d=>{ US_CODE[d]='Digit'+d; });
+Object.assign(US_CODE,{'!':'Digit1','@':'Digit2','#':'Digit3','$':'Digit4','%':'Digit5','^':'Digit6','&':'Digit7',
+  '*':'Digit8','(':'Digit9',')':'Digit0','`':'Backquote','~':'Backquote','-':'Minus','_':'Minus','=':'Equal','+':'Equal',
+  '[':'BracketLeft','{':'BracketLeft',']':'BracketRight','}':'BracketRight','\\':'Backslash','|':'Backslash',
+  ';':'Semicolon',':':'Semicolon',"'":'Quote','"':'Quote',',':'Comma','<':'Comma','.':'Period','>':'Period',
+  '/':'Slash','?':'Slash',' ':'Space'});
+const downAs={};   // physical key -> code sent on keydown, so the keyup always matches
+function codeFor(e){
+  if($('#d-kbd').value!=='auto') return e.code;
+  return (e.key && e.key.length===1 && US_CODE[e.key]) || e.code;
+}
 window.addEventListener('keydown',e=>{
   if(!grabbing) return;
   if(e.code==='Escape'&&e.shiftKey){setGrab(false);return;}
-  e.preventDefault(); if(!e.repeat) send({t:'kd',code:e.code});
+  e.preventDefault();
+  if(e.repeat) return;
+  const c=codeFor(e); downAs[e.code]=c; send({t:'kd',code:c});
 });
-window.addEventListener('keyup',e=>{ if(grabbing){e.preventDefault();send({t:'ku',code:e.code});} });
+window.addEventListener('keyup',e=>{
+  if(!grabbing) return;
+  e.preventDefault();
+  const c=downAs[e.code]||e.code; delete downAs[e.code]; send({t:'ku',code:c});
+});
 function setGrab(on){
   grabbing=on;
   cursor.classList.toggle('on', on&&localCursor);
@@ -719,10 +748,21 @@ stage.addEventListener('touchend',e=>{ send({t:'md',b:0}); send({t:'mu',b:0}); }
 /* auto-hide the top bar */
 let hideTimer;
 function armAutoHide(){
-  const bar=$('#bar');
-  const show=()=>{bar.classList.remove('hidden');clearTimeout(hideTimer);hideTimer=setTimeout(()=>bar.classList.add('hidden'),2800);};
-  ['mousemove','touchstart','keydown'].forEach(ev=>window.addEventListener(ev,show));
-  show();
+  const bar=$('#bar'), handle=$('#barhandle');
+  let edgeTimer=0;
+  const show=()=>{ bar.classList.remove('hidden'); clearTimeout(hideTimer); };
+  const hideSoon=ms=>{ clearTimeout(hideTimer); hideTimer=setTimeout(()=>{ if(!bar.matches(':hover')) bar.classList.add('hidden'); },ms); };
+  // reveal only when the pointer rests at the very top edge for a moment
+  window.addEventListener('mousemove',e=>{
+    if(e.clientY<=3){ if(!edgeTimer) edgeTimer=setTimeout(()=>{ edgeTimer=0; show(); hideSoon(3000); },250); }
+    else { clearTimeout(edgeTimer); edgeTimer=0;
+      if(!bar.classList.contains('hidden') && e.clientY>bar.getBoundingClientRect().bottom+40) hideSoon(700); }
+  });
+  bar.addEventListener('mouseenter',show);
+  bar.addEventListener('mouseleave',()=>hideSoon(1200));
+  handle.addEventListener('click',()=>{ show(); hideSoon(4000); });
+  handle.addEventListener('touchstart',e=>{ e.preventDefault(); show(); hideSoon(5000); },{passive:false});
+  show(); hideSoon(3000);   // shown briefly on connect so people know it exists
 }
 
 refreshHosts();
