@@ -198,6 +198,9 @@ which matters as soon as the phone both hears the desktop and sends its mic.
    mic track is played into pulse sink `nc-mic`; source `nc-mic-in` ("Phone
    microphone") is the desktop's default input; `nc-mic-scope` shows a live waveform.
    Verified with `nc-probe -mic-tone 440`: -91 dB silence -> -24 dB with the tone.
+   **2026-09-23: verified with a real voice from Safari on a Mac (https): the mic reached
+   the desk, was recorded in Audacity, and played back to the browser.** Full-duplex audio
+   works end to end, which is what the voice AI loop (VM-STACK.md) builds on.
    macOS path exists in code (`-mic-device <BlackHole index>`), untested.
 3. Files and clipboard.
 4. Phone camera to desktop on Linux, then the macOS Camera Extension.
