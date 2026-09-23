@@ -29,3 +29,5 @@ git
 curl
 ufw
 vlc
+rofi
+wmctrl

@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=network-computer session setup
+Comment=Alt+Space search and launch bar
+Exec=nc-session-setup
+OnlyShowIn=XFCE;
+NoDisplay=true

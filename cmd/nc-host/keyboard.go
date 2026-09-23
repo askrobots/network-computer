@@ -42,3 +42,14 @@ func runInputHook() {
 		log.Printf("input hook: %v %s", err, strings.TrimSpace(string(out)))
 	}
 }
+
+// launch opens (or closes) the desk's search and launch bar, for the client's
+// 🔍 button. Linux desks only: nc-launch comes with provisioning.
+func launch() {
+	if runtime.GOOS != "linux" {
+		return
+	}
+	if out, err := exec.Command("nc-launch").CombinedOutput(); err != nil {
+		log.Printf("launch: %v %s", err, strings.TrimSpace(string(out)))
+	}
+}

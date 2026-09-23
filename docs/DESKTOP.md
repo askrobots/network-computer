@@ -69,6 +69,8 @@ Every pixel that changes costs bandwidth, and fine detail costs sharpness:
 
 Instead of a picture, the desktop background shows the desk's state at a glance:
 
+- who and where: host name, public and private IP addresses, region, machine size, OS
+  (like BGInfo on Windows desktops);
 - desk volume used and free (it is small, so this matters), the machine's own disk;
 - CPU, memory, uptime;
 - what this computer has cost so far and per hour, and when it will auto-stop;
@@ -80,6 +82,15 @@ seconds, flat colors, no animation, so an idle desk still costs almost no bandwi
 Candidates: conky (draws on the root window, open source, light), or a small script that
 renders an image and sets it as the wallpaper. The numbers nc-host already knows
 (path, round trip, bitrate) could be written to a file for it to read.
+
+## Search and launch (works, 2026-09-23)
+
+**Alt+Space** on the desk, or the 🔍 button in the client, opens one search box over open
+windows, apps and the files in your home (rofi, from Ubuntu's archive; Ulauncher and Albert
+are not packaged). Type, Enter: it switches to the window, starts the app, or opens the
+file. ⌘Space never reaches the desk (macOS keeps it for Spotlight), hence Alt+Space; the
+window menu moved to Shift+Alt+Space. `nc-launch` is the same bar from a script, and voice
+will drive the same actions. Later: document contents (Recoll), a calculator, web search.
 
 ## 5. Your session comes back
 

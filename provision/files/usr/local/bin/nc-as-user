@@ -1,0 +1,17 @@
+#!/bin/sh
+# Run a command inside the desk user's desktop session (display, session bus,
+# home), from root (nc-host, provisioning) or from the user.
+#   nc-as-user COMMAND [ARGS...]
+[ $# -gt 0 ] || { echo "usage: nc-as-user COMMAND [ARGS...]"; exit 2; }
+. /etc/nc/env 2>/dev/null || true
+U=${NC_DESK_USER:-user}
+PID=$(pgrep -u "$U" -x xfce4-session | head -1)
+[ -n "$PID" ] || { echo "nc-as-user: no desktop session for $U" >&2; exit 1; }
+ENVS=$(tr '\0' '\n' < "/proc/$PID/environ")
+BUS=$(echo "$ENVS" | sed -n 's/^DBUS_SESSION_BUS_ADDRESS=//p')
+RUN=$(echo "$ENVS" | sed -n 's/^XDG_RUNTIME_DIR=//p')
+H=$(getent passwd "$U" | cut -d: -f6)
+if [ "$(id -un)" = "$U" ]; then
+  exec env DISPLAY=:0 DBUS_SESSION_BUS_ADDRESS="$BUS" XDG_RUNTIME_DIR="$RUN" "$@"
+fi
+exec runuser -u "$U" -- env DISPLAY=:0 DBUS_SESSION_BUS_ADDRESS="$BUS" HOME="$H" XDG_RUNTIME_DIR="$RUN" "$@"

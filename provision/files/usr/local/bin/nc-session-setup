@@ -1,0 +1,10 @@
+#!/bin/sh
+# Per-session desktop settings, applied at every login (autostart) and by
+# provisioning. Safe to run again.
+[ "$(id -un)" = root ] && exec nc-as-user "$0" "$@"
+q() { xfconf-query -c xfce4-keyboard-shortcuts "$@"; }
+# Alt+Space: the search and launch bar; the window menu moves to Shift+Alt+Space
+q -p '/xfwm4/custom/<Alt>space' -r 2>/dev/null
+q -p '/xfwm4/custom/<Shift><Alt>space' -n -t string -s popup_menu_key 2>/dev/null || q -p '/xfwm4/custom/<Shift><Alt>space' -s popup_menu_key
+q -p '/commands/custom/<Alt>space' -n -t string -s nc-launch 2>/dev/null || q -p '/commands/custom/<Alt>space' -s nc-launch
+echo "shortcuts: Alt+Space search and launch; Shift+Alt+Space window menu"

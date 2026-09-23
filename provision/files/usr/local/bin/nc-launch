@@ -1,0 +1,17 @@
+#!/bin/sh
+# The search and launch bar: open windows, apps, and files in your home.
+# Alt+Space on the desk, the 🔍 button in the client, and voice all call this.
+# Running it while it is open closes it.
+#   nc-launch            everything
+#   nc-launch windows    just the open windows (switcher)
+[ "$(id -un)" = root ] && exec nc-as-user "$0" "$@"
+pkill -x rofi && exit 0
+THEME='window {width: 44%; border-radius: 10px;} listview {lines: 10;} element {padding: 6px 10px;} inputbar {padding: 10px;}'
+case "$1" in
+  windows) MODES=window ;;
+  *)       MODES=window,drun,files ;;
+esac
+exec rofi -show combi -combi-modes "$MODES" -modes "combi,window,drun,files:nc-launch-files" \
+  -show-icons -matching fuzzy -sort -theme Arc-Dark -theme-str "$THEME" -font 'Sans 14' \
+  -window-format '{c}   {t}' -display-combi 'Search' -display-files 'file' -display-drun 'app' -display-window 'window' \
+  -me-select-entry '' -me-accept-entry MousePrimary

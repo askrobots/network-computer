@@ -315,6 +315,9 @@ func (h *host) handleOffer(ctx context.Context, m proto.Message) {
 			case "clipnow":
 				go clip.now()
 				return
+			case "launch":
+				go launch()
+				return
 			}
 			if ev.T == "display" {
 				go func() {

@@ -33,6 +33,7 @@ check "waveform launcher installed"      sh -c 'command -v ffplay && command -v 
 check "sound recorder (Audacity) installed" command -v audacity
 check "video player (VLC) is the default"  sh -c 'command -v vlc && grep -q "^video/mp4=vlc.desktop" /etc/xdg/mimeapps.list'
 check "file transfer (nc-send, Send to my device)" sh -c 'command -v nc-send && test -S /run/nc-host/send.sock && grep -q nc-send /home/$NC_DESK_USER/.config/Thunar/uca.xml'
+check "search and launch bar (Alt+Space)" sh -c 'command -v rofi && command -v nc-launch && nc-as-user xfconf-query -c xfce4-keyboard-shortcuts -p "/commands/custom/<Alt>space" | grep -qx nc-launch'
 check "ALSA apps record from pulse"      sh -c 'timeout 5 arecord -q -D default -d 1 -f S16_LE -r 48000 -c 2 /dev/null'
 check "pavucontrol installed"            command -v pavucontrol
 check "no pulse autospawn override"      sh -c '! test -e /etc/pulse/client.conf.d/01-enable-autospawn.conf'

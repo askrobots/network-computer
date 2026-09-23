@@ -198,6 +198,7 @@
     <button class="bar-btn" id="b-mic" title="Microphone">🎤</button>
     <button class="bar-btn" id="b-graphs" title="Graphs">📈</button>
     <button class="bar-btn" id="b-stats" title="Stats">📊</button>
+    <button class="bar-btn" id="b-launch" title="Search and launch on the desk (Alt+Space)">🔍</button>
     <button class="bar-btn" id="b-clipup" title="Send this device's clipboard to the desk">📋↑</button>
     <button class="bar-btn" id="b-clipdown" title="Copy the desk's clipboard to this device">📋↓</button>
     <button class="bar-btn" id="b-keys" title="Keyboard">⌨️</button>
@@ -754,6 +755,7 @@ $('#b-clipup').onclick=async()=>{
   if(!text){ toast('No text on this clipboard (or the browser said no)'); return; }
   sendClip(text); toast('Clipboard sent to the desk');
 };
+$('#b-launch').onclick=()=>{ if(ctlOpen()) ctl.send(JSON.stringify({t:'launch'})); if(!grabbing) setGrab(true); };
 $('#b-clipdown').onclick=()=>{ if(!ctlOpen()) return; clipAsked=true; startCopy('clipnow'); };
 /* ---------- files ---------- */
 // Each file has its own reliable channel: {"name","size"}, binary pieces,
