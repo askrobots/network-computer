@@ -12,7 +12,8 @@ func TestNormalize(t *testing.T) {
 		want displayReq
 	}{
 		{proto.InputEvent{W: 1920, H: 1080, S: 1.5}, displayReq{1920, 1080, 1.5}},
-		{proto.InputEvent{W: 1917, H: 1083, S: 1.26}, displayReq{1912, 1080, 1.25}}, // multiples of 8, 5% steps
+		{proto.InputEvent{W: 1600, H: 900, S: 1.5}, displayReq{1600, 900, 1.5}},     // 900 stays 900
+		{proto.InputEvent{W: 1917, H: 1083, S: 1.26}, displayReq{1912, 1082, 1.25}}, // width /8, height even, 5% steps
 		{proto.InputEvent{W: 9000, H: 9000, S: 9}, displayReq{2560, 1600, 3}},       // clamped
 		{proto.InputEvent{W: 10, H: 10, S: 0}, displayReq{640, 360, 1}},             // floor + default scale
 	}

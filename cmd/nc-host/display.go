@@ -29,11 +29,12 @@ type displayReq struct {
 	S    float64
 }
 
-// normalize clamps a request to what the host will do: sizes within bounds
-// and multiples of 8 (encoders and modelines want that), scale in 5% steps.
+// normalize clamps a request to what the host will do: sizes within bounds,
+// width a multiple of 8 (display mode timings need it), height even (4:2:0
+// video needs it), scale in 5% steps.
 func normalize(e proto.InputEvent) displayReq {
 	clamp := func(v, lo, hi int) int { return int(math.Max(float64(lo), math.Min(float64(hi), float64(v)))) }
-	w, h := clamp(e.W, minW, maxW)/8*8, clamp(e.H, minH, maxH)/8*8
+	w, h := clamp(e.W, minW, maxW)/8*8, clamp(e.H, minH, maxH)/2*2
 	s := e.S
 	if s <= 0 {
 		s = 1
