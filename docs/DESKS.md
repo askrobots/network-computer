@@ -24,9 +24,9 @@ different volumes (or does not live on a volume at all).
 | Kind | Size | Rule | Home |
 |---|---|---|---|
 | Identity and secrets: API keys, login, PIN, pairing secret, TLS cert | KB | never lose; must follow you anywhere | desk volume now; later a region-free encrypted store (the object server) |
-| Prefs: desktop, editor, browser profile (without its cache) | MB | keep, back up | `desk` volume |
-| Documents and exports, in our own file formats | GB, grows | keep, scheduled snapshots | `desk` volume |
-| Speech and AI models | GB | reproducible, no backup | `models` volume, wipe anytime |
+| Prefs: desktop, editor, browser profile (without its cache) | MB | keep, back up | `desk` volume, 1 GB |
+| Documents and exports, in our own file formats | grows | keep, optional snapshots | `desk` volume, 1 GB |
+| Speech and AI models | GB | reproducible, no backup | **not persisted**: downloaded on demand at boot (seconds inside DigitalOcean), later baked into the saved image |
 | Projects: a repo, a dataset, a client's files | varies | attach while working; maybe team-shared | one volume per project |
 | Demo desk | small | reset to clean after every use | own volume, restored from a snapshot |
 | OS, installed apps, caches | GB | rebuilt every boot, installed on demand | the computer's own disk |
@@ -51,10 +51,15 @@ Constraints that shape this (DigitalOcean):
   a computer can take a handful of volumes (7 on DigitalOcean at time of writing).
 - **Volumes grow online but never shrink:** start small.
 
-Dev setup to build first: `desk` 2 GB (prefs, documents, secrets; snapshotted) and
-`models` 3 GB (speech + one small local model; not backed up). $0.50/month together at
-$0.10/GB-month. Mount logic takes a list, so project and demo volumes are just more entries,
-and `verify.sh` checks each one.
+**Decided 2026-09-22: one 1 GB `desk` volume per user, $0.10/month.** It is a locker, not
+the whole home folder: the home stays on the computer's disk and only a fixed list lives on
+the desk (`Documents`, `.config`, the keyring, `Desktop`), so 1 GB cannot fill by accident.
+Downloads and caches stay local and vanish on rebuild, like a real hot desk. The desk also
+holds the desk's identity (login password, PIN, pairing secret, certificate cache) and API
+keys, generated on first boot and reused after, so rebuilds keep pairings and never hit the
+Let's Encrypt weekly limit. Models are downloaded on demand. Scripts never delete a volume;
+destroying a computer detaches it, and also removes the domain's DNS record so no dangling
+record can point at a reassigned IP. A snapshot of a 1 GB desk is about $0.06/month.
 
 On-computer AI: whisper.cpp (speech-to-text) and Piper (voice) are practical on CPU with
 about 0.5 GB of models; 4 vCPUs keep up with speech. A small local model (Llama 3.2 3B,
@@ -77,7 +82,7 @@ DigitalOcean list prices, 2026-09-22. A computer bills while it exists, even pow
 
 GPU sizes exist only in some regions, and a desk volume attaches only in its own region.
 
-Example: desk volumes $0.50/month + 40 hours on s-4vcpu-8gb ($2.86) = about $3.40/month,
+Example: a 1 GB desk at $0.10/month + 40 hours on s-4vcpu-8gb ($2.86) = about $2.96/month,
 against $24/month for an always-on s-2vcpu-4gb.
 
 ## Automatic shutdown and wake
@@ -166,7 +171,7 @@ audit trail, and the same permission engine decides what the AI may see and do f
 
 ## Build order
 
-1. **Desk volumes** (`desk` + `models`), a real user account living on the desk, secrets /
+1. **Desk volume** (1 GB per user), a real user account whose locker folders live on it, secrets /
    certificate / pairing moved onto it, and "sit down" / "get up" commands. Tested by rebuilding
    on a different size and confirming prefs, a test API key, the certificate and a phone pairing
    all survive.
