@@ -64,7 +64,9 @@ func (c *clipSync) receive(ev proto.InputEvent) {
 	c.mu.Unlock()
 	if err := clipWrite(text); err != nil {
 		log.Printf("clipboard: set: %v", err)
+		return
 	}
+	log.Printf("clipboard: client pasted %d bytes", len(text))
 }
 
 // get is the client asking for what the user is about to copy.
@@ -109,6 +111,7 @@ func (c *clipSync) run(ctx context.Context) {
 		c.mu.Unlock()
 		switch {
 		case changed:
+			log.Printf("clipboard: desk copied %d bytes, sent to the client", len(t))
 			c.send(t)
 			waitUntil = time.Time{}
 		case !waitUntil.IsZero() && time.Now().After(waitUntil):

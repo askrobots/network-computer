@@ -323,7 +323,11 @@ func main() {
 		json.NewEncoder(w).Encode(h.hostNames())
 	})))
 	// the page itself is public: no browser login dialog, the app's form asks once
-	mux.Handle("/", http.FileServer(http.FS(sub)))
+	files := http.FileServer(http.FS(sub))
+	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache") // the client changes with the server: always revalidate
+		files.ServeHTTP(w, r)
+	}))
 
 	srv := &http.Server{Addr: *httpAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 

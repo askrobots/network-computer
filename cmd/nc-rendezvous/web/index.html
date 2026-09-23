@@ -688,6 +688,7 @@ function finishPaste(text){
   pasteArmed=false; clearTimeout(pasteTimer); clipBox.blur();
   if(!ctlOpen()) return;
   if(text) sendClip(text);
+  toast(text ? 'Pasted from this device' : "Pasted the desk's clipboard (no text here to send)");
   ctl.send(JSON.stringify({t:'kd',code:'KeyV'})); ctl.send(JSON.stringify({t:'ku',code:'KeyV'}));
 }
 clipBox.addEventListener('paste',e=>{ e.preventDefault(); finishPaste(e.clipboardData.getData('text/plain')); });
