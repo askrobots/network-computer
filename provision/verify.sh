@@ -37,6 +37,7 @@ echo "browser + default apps"
 check "Firefox from Mozilla (not snap)"  sh -c 'dpkg-query -W -f="\${Version}" firefox | grep -q build'
 check "https opens Firefox"              sh -c '[ "$(xdg-mime query default x-scheme-handler/https)" = firefox.desktop ]'
 check "xfce WebBrowser helper = firefox" has /etc/xdg/xfce4/helpers.rc '^WebBrowser=firefox'
+check "screen resize helper installed"   sh -c 'command -v nc-display && command -v cvt && command -v xrandr'
 check "xdotool installed"                command -v xdotool
 
 echo "desktop polish"

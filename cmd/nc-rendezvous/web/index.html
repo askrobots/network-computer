@@ -80,6 +80,11 @@
     z-index:16;display:none;align-items:center;gap:10px;padding:8px 12px;background:#12151acc;
     border:1px solid var(--line);border-radius:10px;backdrop-filter:blur(8px);font-size:12.5px}
   #micpanel.on{display:flex}
+  #disppanel{position:absolute;top:calc(56px + env(safe-area-inset-top,0px));right:12px;z-index:16;display:none;
+    align-items:center;gap:8px;padding:8px 12px;background:#12151acc;border:1px solid var(--line);border-radius:10px;
+    backdrop-filter:blur(8px);font-size:12.5px}
+  #disppanel.on{display:flex}
+  #disppanel select{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:4px 6px}
   #micpanel select{max-width:220px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:4px 6px}
   #micmeter{width:120px;height:8px;border-radius:4px;background:#0c0f13;overflow:hidden}
   #micmeter i{display:block;height:100%;width:0;background:var(--accent2);transition:width .08s linear}
@@ -172,6 +177,7 @@
     <span class="pill host"><span class="dot" id="dot"></span><span id="p-host">—</span></span>
     <span class="pill" id="p-net">connecting…</span>
     <span class="spacer"></span>
+    <button class="bar-btn" id="b-display" title="Screen size and scale">🖥️</button>
     <button class="bar-btn" id="b-mic" title="Microphone">🎤</button>
     <button class="bar-btn" id="b-graphs" title="Graphs">📈</button>
     <button class="bar-btn" id="b-stats" title="Stats">📊</button>
@@ -181,6 +187,11 @@
   </div>
 
   <div id="stats"></div>
+  <div id="disppanel" class="panel">
+    <span>🖥️</span>
+    <select id="d-res" title="Screen size"></select>
+    <select id="d-scale" title="Text and UI scale"></select>
+  </div>
   <div id="micpanel">
     <span>🎤</span>
     <select id="mic-dev" title="Microphone"></select>
@@ -232,7 +243,7 @@ try{localStorage.removeItem('nc.pin')}catch(e){}  // PIN no longer stored; pairi
 $('#f-cursor').checked = store.get('cursor','1')==='1';
 $('#f-relay').checked  = store.get('relay','0')==='1';
 
-let ws, pc, dc, statsTimer, watchdog, cfg, hostName, audioTx=null, micStream=null;
+let ws, pc, dc, ctl, statsTimer, watchdog, cfg, hostName, audioTx=null, micStream=null;
 let localCursor=true, retryWanted=false, retries=0, lastFrames=0;
 
 function msg(t,cls){const m=$('#f-msg');m.textContent=t||'';m.className='msg '+(cls||'info');}
@@ -336,6 +347,9 @@ async function openPeer(){
   pc.addTransceiver('video',{direction:'recvonly'});
   audioTx = pc.addTransceiver('audio',{direction:'sendrecv'}); // mic attached on demand
   dc=pc.createDataChannel('input',{ordered:false,maxRetransmits:0});
+  // reliable + ordered: requests that must not be dropped (screen size, later files and clipboard)
+  ctl=pc.createDataChannel('control');
+  ctl.onopen=()=>{ lastDisplay=null; sendDisplay(); };
 
   pc.ontrack=ev=>{
     stream.addTrack(ev.track);
@@ -571,6 +585,43 @@ async function setMic(on){
 }
 $('#b-mic').onclick=()=>setMic(!micStream);
 $('#mic-dev').onchange=e=>useMic(e.target.value).catch(err=>toast('Could not switch: '+err.message));
+
+/* ---------- screen size and scale ---------- */
+// The remote screen can match this window, so it is drawn pixel for pixel
+// instead of scaled; "sharp" matches physical pixels on Retina displays.
+// Scale makes the desktop's text and controls bigger.
+const RES=[['window','Match window'],['sharp','Match window, sharp'],['1280x720','1280 × 720'],
+           ['1600x900','1600 × 900'],['1920x1080','1920 × 1080'],['2560x1440','2560 × 1440']];
+const SCALES=[1,1.25,1.5,1.75,2];
+let lastDisplay=null, resizeTimer=0;
+for(const [v,label] of RES){ const o=document.createElement('option'); o.value=v; o.textContent=label; $('#d-res').appendChild(o); }
+for(const v of SCALES){ const o=document.createElement('option'); o.value=v; o.textContent=Math.round(v*100)+'%'; $('#d-scale').appendChild(o); }
+$('#d-res').value=store.get('res','window'); $('#d-scale').value=store.get('scale','1');
+function wantedSize(){
+  const mode=$('#d-res').value;
+  if(mode==='window'||mode==='sharp'){
+    const k=mode==='sharp'?(window.devicePixelRatio||1):1;
+    let w=window.innerWidth*k, h=window.innerHeight*k;
+    const f=Math.min(1,2560/w,1600/h);           // the host caps at 2560x1600
+    return [Math.floor(w*f/8)*8, Math.floor(h*f/8)*8];
+  }
+  return mode.split('x').map(Number);
+}
+function sendDisplay(){
+  if(!ctl||ctl.readyState!=='open') return;
+  const [w,h]=wantedSize(), s=parseFloat($('#d-scale').value);
+  if(lastDisplay&&lastDisplay.w===w&&lastDisplay.h===h&&lastDisplay.s===s) return;
+  lastDisplay={w,h,s};
+  ctl.send(JSON.stringify({t:'display',w,h,s}));
+  toast(`Screen ${w}×${h} at ${Math.round(s*100)}%`);
+}
+$('#b-display').onclick=()=>{ const on=$('#disppanel').classList.toggle('on'); $('#b-display').classList.toggle('active',on); };
+$('#d-res').onchange=()=>{ store.set('res',$('#d-res').value); sendDisplay(); };
+$('#d-scale').onchange=()=>{ store.set('scale',$('#d-scale').value); sendDisplay(); };
+window.addEventListener('resize',()=>{
+  if(!/^(window|sharp)$/.test($('#d-res').value)) return;
+  clearTimeout(resizeTimer); resizeTimer=setTimeout(sendDisplay,700);   // settle before asking
+});
 
 /* ---------- fullscreen ---------- */
 $('#b-full').onclick=()=>{

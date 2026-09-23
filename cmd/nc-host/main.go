@@ -39,6 +39,7 @@ type host struct {
 	user, password, pin string
 	httpc               *http.Client // pinned when -tls-fingerprint is set
 	pairs               *pairing
+	display             displayControl
 
 	mu       sync.Mutex
 	ws       *websocket.Conn
@@ -275,6 +276,7 @@ func (h *host) handleOffer(ctx context.Context, m proto.Message) {
 		}
 	}
 
+	restartCapture := make(chan captureOpts, 1)
 	inj, err := input.New(h.capture.Display, h.dryRun)
 	if err != nil {
 		log.Printf("[%s] input: %v (falling back to dry-run)", peer, err)
@@ -284,9 +286,25 @@ func (h *host) handleOffer(ctx context.Context, m proto.Message) {
 		log.Printf("[%s] data channel %q", peer, dc.Label())
 		dc.OnMessage(func(msg webrtc.DataChannelMessage) {
 			var ev proto.InputEvent
-			if err := json.Unmarshal(msg.Data, &ev); err == nil {
-				inj.Handle(ev)
+			if err := json.Unmarshal(msg.Data, &ev); err != nil {
+				return
 			}
+			if ev.T == "display" {
+				go func() {
+					req := normalize(ev)
+					if h.display.apply(req) {
+						opts := h.capture
+						opts.Width, opts.Height = req.W, req.H
+						opts.Bitrate = bitrateFor(h.capture.Bitrate, req.W, req.H)
+						select {
+						case restartCapture <- opts:
+						default: // a restart is already queued; the newer size follows
+						}
+					}
+				}()
+				return
+			}
+			inj.Handle(ev)
 		})
 	})
 
@@ -305,7 +323,28 @@ func (h *host) handleOffer(ctx context.Context, m proto.Message) {
 		switch st {
 		case webrtc.PeerConnectionStateConnected:
 			go logSelectedPair(peer, pc)
-			go streamVideo(sctx, h.capture, video, nil)
+			go func() {
+				opts := h.capture
+				if last := h.display.current(); last.W > 0 {
+					opts.Width, opts.Height = last.W, last.H
+					opts.Bitrate = bitrateFor(h.capture.Bitrate, last.W, last.H)
+				}
+				for {
+					cctx, ccancel := context.WithCancel(sctx)
+					done := make(chan struct{})
+					go func(o captureOpts) { streamVideo(cctx, o, video, nil); close(done) }(opts)
+					select {
+					case <-sctx.Done():
+						ccancel()
+						<-done
+						return
+					case opts = <-restartCapture:
+						ccancel()
+						<-done
+						log.Printf("[%s] capture restarting at %dx%d, %s", peer, opts.Width, opts.Height, opts.Bitrate)
+					}
+				}
+			}()
 			if audioTrack != nil {
 				go streamAudio(sctx, h.audio, audioTrack)
 			}

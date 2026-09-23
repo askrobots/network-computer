@@ -39,6 +39,7 @@ func main() {
 	tlsFP := flag.String("tls-fingerprint", os.Getenv("NC_TLS_FP"), "pin the rendezvous certificate by SHA-256 (env NC_TLS_FP)")
 	pair := flag.String("pair", os.Getenv("NC_PAIR"), "pairing token from an earlier connection, used instead of the PIN (env NC_PAIR)")
 	sendInput := flag.Bool("input", false, "send a few test input events over the data channel")
+	display := flag.String("display", "", "ask the host for a screen size and scale over the control channel, e.g. 1600x900@1.5")
 	micTone := flag.Int("mic-tone", 0, "send a sine tone of this frequency (Hz) as the probe's microphone, to test mic passthrough")
 	flag.Parse()
 
@@ -114,6 +115,21 @@ func main() {
 		pc.AddTransceiverFromKind(webrtc.RTPCodecTypeAudio, webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionRecvonly})
 	}
 	dc, _ := pc.CreateDataChannel("input", nil)
+	if *display != "" {
+		var w, hgt int
+		scale := 1.0
+		if _, err := fmt.Sscanf(strings.Replace(*display, "@", " ", 1), "%dx%d %f", &w, &hgt, &scale); err != nil {
+			if _, err := fmt.Sscanf(*display, "%dx%d", &w, &hgt); err != nil {
+				log.Fatalf("-display wants WxH or WxH@scale, got %q", *display)
+			}
+		}
+		ctl, _ := pc.CreateDataChannel("control", nil) // reliable, like the web client's
+		ctl.OnOpen(func() {
+			b, _ := json.Marshal(proto.InputEvent{T: "display", W: w, H: hgt, S: scale})
+			ctl.Send(b)
+			log.Printf("asked for screen %dx%d at %.0f%%", w, hgt, scale*100)
+		})
+	}
 
 	connected := make(chan struct{})
 	pc.OnConnectionStateChange(func(s webrtc.PeerConnectionState) {
