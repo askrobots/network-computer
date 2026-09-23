@@ -50,7 +50,7 @@ and files. See [docs/PLAN.md](docs/PLAN.md) for the design,
   [docs/DESKS.md](docs/DESKS.md).
 - **One-command desk on DigitalOcean:** `infra/droplet.sh up` builds a provisioned
   Ubuntu desktop (Xfce, Firefox, VLC, Audacity, the tools above) with its DNS name,
-  checked by 56 automated checks; `infra/droplet.sh down` destroys it and keeps the desk.
+  checked by 57 automated checks; `infra/droplet.sh down` destroys it and keeps the desk.
 
 ### Clients
 

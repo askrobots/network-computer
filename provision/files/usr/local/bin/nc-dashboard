@@ -1,0 +1,4 @@
+#!/bin/sh
+# The desktop dashboard (started at login). One at a time.
+pkill -u "$(id -u)" -x conky 2>/dev/null
+exec conky -c /etc/nc-dashboard/conky.conf

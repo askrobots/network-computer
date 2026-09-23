@@ -17,3 +17,18 @@ if [ ! -e "$L" ] && [ ! -e "$HOME/.config/nc/object-icon-placed" ]; then
     gio set -t string "$L" metadata::xfce-exe-checksum "$(sha256sum "$L" | cut -d' ' -f1)" 2>/dev/null
   mkdir -p "$HOME/.config/nc" && touch "$HOME/.config/nc/object-icon-placed"
 fi
+
+# a plain background, once: it streams far cheaper than a detailed picture, and the
+# dashboard sits on it (the user can pick any wallpaper afterwards)
+if [ ! -e "$HOME/.config/nc/plain-background" ]; then
+  for p in $(xfconf-query -c xfce4-desktop -l | grep '/workspace[0-9]*/image-style$'); do
+    xfconf-query -c xfce4-desktop -p "$p" -s 0                                  # no image
+    xfconf-query -c xfce4-desktop -p "${p%image-style}color-style" -s 0 2>/dev/null   # solid color
+    xfconf-query -c xfce4-desktop -p "${p%image-style}rgba1" -n -t double -s 0.075 -t double -s 0.09 \
+      -t double -s 0.125 -t double -s 1 2>/dev/null ||
+    xfconf-query -c xfce4-desktop -p "${p%image-style}rgba1" -t double -s 0.075 -t double -s 0.09 \
+      -t double -s 0.125 -t double -s 1
+  done
+  mkdir -p "$HOME/.config/nc" && touch "$HOME/.config/nc/plain-background"
+fi
+pgrep -u "$(id -u)" -x conky >/dev/null || (setsid nc-dashboard >/dev/null 2>&1 &)

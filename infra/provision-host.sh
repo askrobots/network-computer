@@ -23,7 +23,8 @@ ssh "$USER@$IP" 'mkdir -p /root/provision'
 scp -q -r "$ROOT/provision/." "$USER@$IP":/root/provision/
 # sudo only if not already root
 PFX=""; [ "$USER" = root ] || PFX="sudo "
-ssh "$USER@$IP" "NC_PUBLIC_IP=$IP NC_HOST_NAME=$NAME NC_DOMAIN=$NC_DOMAIN NC_DESK_USER=$NC_DESK_USER ${PFX}sh /root/provision/apply.sh"
+# NC_SIZE and NC_PRICE_HOURLY (optional) only label the desktop dashboard
+ssh "$USER@$IP" "NC_PUBLIC_IP=$IP NC_HOST_NAME=$NAME NC_DOMAIN=$NC_DOMAIN NC_DESK_USER=$NC_DESK_USER NC_SIZE=$NC_SIZE NC_PRICE_HOURLY=$NC_PRICE_HOURLY ${PFX}sh /root/provision/apply.sh"
 echo
 if [ -n "$NC_DOMAIN" ]; then URL="https://$NC_DOMAIN"; else URL="http://$IP:8765"; fi
 echo "done. rendezvous: $URL   secrets: ssh $USER@$IP ${PFX}cat /etc/nc/env"

@@ -50,7 +50,9 @@ case "$1" in
   logs)   ssh root@"$(ip)" journalctl -f -u nc-host -u nc-rendezvous ;;
   update) ssh root@"$(ip)" 'cd /opt/network-computer && git pull -q && export PATH=$PATH:/usr/local/go/bin && go build -buildvcs=false -o /usr/local/bin/ ./cmd/... && systemctl restart nc-rendezvous nc-host && echo updated' ;;
   provision) IP=$(ip); ssh root@"$IP" 'mkdir -p /root/provision'; scp -q -r "$ROOT/provision/." root@"$IP":/root/provision/
-             ssh root@"$IP" "NC_PUBLIC_IP=$IP NC_HOST_NAME=$NC_HOST_NAME NC_DOMAIN=$NC_DOMAIN NC_DESK_USER=$NC_DESK_USER NC_KEYBOARD=$NC_KEYBOARD sh /root/provision/apply.sh" ;;
+             SIZE=$(doctl compute droplet get "$(id)" -o json | grep -o '"size_slug": *"[^"]*"' | head -1 | cut -d'"' -f4)
+             PRICE=$(doctl compute size list --format Slug,PriceHourly --no-header | awk -v s="$SIZE" '$1==s{print $2}')
+             ssh root@"$IP" "NC_PUBLIC_IP=$IP NC_HOST_NAME=$NC_HOST_NAME NC_DOMAIN=$NC_DOMAIN NC_DESK_USER=$NC_DESK_USER NC_KEYBOARD=$NC_KEYBOARD NC_SIZE=$SIZE NC_PRICE_HOURLY=$PRICE sh /root/provision/apply.sh" ;;
   dns)    sh ./dns-point.sh "${2:?usage: droplet.sh dns <name.domain>}" "$(ip)" ;;
   desk)   doctl compute volume list --format Name,Size,Region,DropletIDs,Tags --no-header | awk -v n="$VOL" '$1==n' | grep . || echo "no desk named $VOL yet (it is created on the first 'up')" ;;
   snapshot-desk)

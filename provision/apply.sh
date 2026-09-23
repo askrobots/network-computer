@@ -141,6 +141,11 @@ envset NC_HOST_NAME "$NC_HOST_NAME"
 envset NC_DOMAIN "$NC_DOMAIN"
 envset NC_DESK_USER "$NC_DESK_USER"
 [ -z "$NC_KEYBOARD" ] || envset NC_KEYBOARD "$NC_KEYBOARD"
+[ -z "$NC_SIZE" ] || envset NC_SIZE "$NC_SIZE"
+[ -z "$NC_PRICE_HOURLY" ] || envset NC_PRICE_HOURLY "$NC_PRICE_HOURLY"
+# what the desktop dashboard may show: no secrets (the env file holds passwords)
+( . /etc/nc/env; umask 022; printf 'NC_HOST_NAME=%s\nNC_DOMAIN=%s\nNC_PUBLIC_IP=%s\nNC_SIZE=%s\nNC_PRICE_HOURLY=%s\n' \
+    "$NC_HOST_NAME" "$NC_DOMAIN" "$NC_PUBLIC_IP" "$NC_SIZE" "$NC_PRICE_HOURLY" > /etc/nc/info )
 
 echo ">> desktop user ($NC_DESK_USER)"
 if ! id "$NC_DESK_USER" >/dev/null 2>&1; then

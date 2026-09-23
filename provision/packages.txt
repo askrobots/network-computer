@@ -33,3 +33,4 @@ rofi
 wmctrl
 espeak-ng
 python3-venv
+conky-std

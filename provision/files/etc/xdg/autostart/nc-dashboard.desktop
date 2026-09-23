@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=network-computer dashboard
+Comment=This computer, its cost, space, load and services, on the desktop
+Exec=nc-dashboard
+OnlyShowIn=XFCE;
+NoDisplay=true

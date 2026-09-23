@@ -65,7 +65,18 @@ Every pixel that changes costs bandwidth, and fine detail costs sharpness:
   video compression smears), and a clear UI and terminal font;
 - measure before and after with the stats panel (bitrate on an idle desktop).
 
-### Idea: the background is a dashboard
+### The background is a dashboard (works, 2026-09-23)
+
+conky draws it on a plain dark background (set once; any wallpaper can replace it):
+this computer's name, domain, public and private IP, region and size; what it costs
+($/h, $/day, the month's cap) and what this boot has spent; host, rendezvous, voice,
+object server and audio status; API keys by name only; CPU, memory, uptime; desk and
+disk space; network in and out. The infra scripts pass the droplet's size and hourly
+price to provisioning, which writes them with the other non-secret facts to
+`/etc/nc/info` (the env file holds passwords and stays root-only). Numbers update
+every 5 s and only that text is redrawn, so an idle desk still streams almost nothing.
+
+The original idea:
 
 Instead of a picture, the desktop background shows the desk's state at a glance:
 

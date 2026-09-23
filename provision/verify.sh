@@ -38,6 +38,7 @@ check "object server answers (local only)" sh -c 'curl -sf http://127.0.0.1:8001
 check "voice listener running (nc-voice)"   systemctl is-active --quiet nc-voice
 check "computer controller (nc-desk) sees the screen" sh -c 'nc-desk screen | grep -q "\"ok\": true"'
 check "object server sign-in helper (local only)" sh -c 'curl -s -o /dev/null -w "%{http_code}" "http://localhost:8009/open?next=/" | grep -qx 302 && ! ss -ltn | grep -q "0.0.0.0:8009"'
+check "desktop dashboard running (conky)"  pgrep -x conky
 check "ALSA apps record from pulse"      sh -c 'timeout 5 arecord -q -D default -d 1 -f S16_LE -r 48000 -c 2 /dev/null'
 check "pavucontrol installed"            command -v pavucontrol
 check "no pulse autospawn override"      sh -c '! test -e /etc/pulse/client.conf.d/01-enable-autospawn.conf'
