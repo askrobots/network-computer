@@ -1,0 +1,14 @@
+[Unit]
+Description=DBBASIC object server daemon on this desk (notifications, schedules, queues)
+After=nc-object-server.service
+Wants=nc-object-server.service
+[Service]
+# the user comes from a drop-in (user.conf) written by apply.sh
+EnvironmentFile=/etc/nc/object-server.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+WorkingDirectory=/opt/dbbasic-object-server
+ExecStart=/opt/dbbasic-object-server/.venv/bin/python object_daemon.py --interval 2
+Restart=always
+RestartSec=5
+[Install]
+WantedBy=multi-user.target

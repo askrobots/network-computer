@@ -5,6 +5,8 @@
 #   nc-launch            everything
 #   nc-launch windows    just the open windows (switcher)
 #   nc-launch search Q   everything, with Q already typed
+#   nc-launch records    your object server records (notes, tasks, files)
+# Tabs along the bottom (Ctrl+Tab): Search, records, files.
 [ "$(id -un)" = root ] && exec nc-as-user "$0" "$@"
 pkill -x rofi && exit 0
 THEME='window {width: 44%; border-radius: 10px;} listview {lines: 10;} element {padding: 6px 10px;} inputbar {padding: 10px;}'
@@ -12,9 +14,10 @@ FILTER=
 case "$1" in
   windows) MODES=window ;;
   search)  MODES=window,drun,files; FILTER=$2 ;;
+  records) MODES=window,drun,files; SHOW=records ;;
   *)       MODES=window,drun,files ;;
 esac
-exec rofi -show combi -combi-modes "$MODES" -modes "combi,window,drun,files:nc-launch-files" \
+exec rofi -show "${SHOW:-combi}" -combi-modes "$MODES" -modes "combi,records:nc-launch-records,files:nc-launch-files" -sidebar-mode \
   -show-icons -matching fuzzy -sort -theme Arc-Dark -theme-str "$THEME" -font 'Sans 14' \
   -window-format '{c}   {t}' -display-combi 'Search' -display-files 'file' -display-drun 'app' -display-window 'window' \
   -me-select-entry '' -me-accept-entry MousePrimary ${FILTER:+-filter "$FILTER"}

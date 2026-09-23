@@ -180,6 +180,22 @@ the Applications menu opened by clicking what it saw, then checked; a file trash
 attached to every chat call cost about 4 s per call, so voice calls the reader and search
 itself, only when needed.
 
+## The object server as part of the desktop (2026-09-23)
+
+- **Its pages are apps.** `nc-webapp NAME URL ICON` (WebKitGTK, open source) opens a
+  page in its own window: the app's name, its own taskbar entry, its own cookie store,
+  no tabs or address bar; other sites open in the normal browser; the microphone only
+  for local pages. Object Server, Talk, Shell, Files, Notes and Tasks are in the
+  Applications menu this way, signed in through the local helper.
+- **Alt+Space searches your records.** The launcher has a records tab (Ctrl+Tab): type,
+  Enter, pick a note or task to open it. Voice can `find` records and take a `note`.
+- **Its notifications are desktop notifications.** The object server's daemon
+  (`nc-object-daemon`) turns record changes into notifications (app-notify); nc-voice
+  shows each new one once, bottom right (top right is where browser tabs are), and
+  clicking Open goes to its page.
+- Installed packages: theme, views, nav, shell, files, projects, collab, notes, tasks,
+  notify.
+
 ## 5. Your session comes back
 
 Windows, terminal sessions (`tmux` on the desk) and Firefox tabs restored after a rebuild,

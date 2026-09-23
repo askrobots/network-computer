@@ -353,10 +353,14 @@ def act(a, scale=None):
         links = " ".join(f"[{l.get('n')}] {l.get('label', '')[:40]}" for l in (r.get("links") or [])[:40])
         return (f"read {r.get('title') or a.get('url')}: {(r.get('text') or '')[:6000]}"
                 + (f" LINKS: {links}" if links else ""))
+    if kind == "note":
+        data, _ = OBJ_FOR_ACTIONS.call("/collections/notes/records",
+                                       json.dumps({"content": a.get("text", "")}).encode(), "application/json")
+        return f"noted: {a.get('text', '')[:80]}"
     if kind == "find":
         q = urllib.parse.quote(a.get("query", ""))
         r = OBJ_FOR_ACTIONS.get(f"/api/search?q={q}&limit=10")
-        hits = r.get("results") or r.get("records") or r.get("hits") or []
+        hits = {c: rows for c, rows in (r.get("results") or {}).items() if rows}
         return f"found for {a.get('query')!r}: " + (json.dumps(hits)[:3000] if hits else "nothing")
     if kind == "arrange":
         r = nc_desk("arrange", a.get("window", ""), a.get("how", ""))
@@ -422,6 +426,7 @@ Actions, done in order:
   {"do": "read_page", "url": "https://..."}   a web page's text and numbered links
                    (cheaper than a screenshot for reading or summarizing a page)
   {"do": "find", "query": "..."}   search the user's own records (notes, tasks...)
+  {"do": "note", "text": "..."}   save a note in their object server ("take a note...")
   {"do": "look"}   to get a screenshot of the screen as it is (after your other actions)
 Seeing: the window list gives only titles, never contents. To read or describe what is in
 a window, or to click something, you need a screenshot: add look. Mouse coordinates are
@@ -469,7 +474,7 @@ def parse_reply(reply):
 # which sees the user's words and exactly what is about to happen. Trash, and
 # anything the reviewer is unsure of, is asked of the user out loud.
 SAFE = {"open_app", "switch", "close", "arrange", "open", "search", "look", "ls", "mkdir",
-        "move", "copy", "scroll", "read_page", "find"}
+        "move", "copy", "scroll", "read_page", "find", "note"}
 REVIEW = {"click", "drag", "type", "keys"}
 ASK = {"trash"}
 REVIEW_MODEL = os.environ.get("NC_VOICE_REVIEW_MODEL", "anthropic:claude-haiku-4-5")
@@ -788,6 +793,43 @@ def chime():
     player(rate, "nc-chime").communicate(out.tobytes())
 
 
+# ---------- object server notifications on the desktop ----------
+
+def notifications(obj):
+    """Unread notifications for the desk user (app-notify fills them from record
+    changes) appear once as desktop notifications; clicking opens their page."""
+    state = os.path.expanduser("~/.cache/nc/notified")
+    os.makedirs(os.path.dirname(state), exist_ok=True)
+    seen = set(open(state).read().split()) if os.path.exists(state) else None
+    while True:
+        try:
+            rows = obj.get("/collections/notifications/records?limit=100").get("records") or []
+            new = [r for r in rows if str(r.get("user_id")) == USER and str(r.get("is_read")).lower() not in ("true", "1")]
+            if seen is None:   # first run: don't replay the past
+                seen = {r["id"] for r in rows}
+            for r in new:
+                if r["id"] in seen:
+                    continue
+                seen.add(r["id"])
+                threading.Thread(target=show_notification, args=(r,), daemon=True).start()
+            with open(state, "w") as f:
+                f.write("\n".join(sorted(seen)[-2000:]))
+        except Exception as e:
+            log(f"notifications: {e}")
+        time.sleep(20)
+
+
+def show_notification(r):
+    body, target = str(r.get("body") or ""), str(r.get("target") or "")
+    cmd = ["nc-as-user", "notify-send", "-a", "Object Server", "-i", "applications-internet"]
+    if target.startswith("/") and not target.startswith("//"):
+        cmd += ["-A", "open=Open", "-w"]   # waits for a click
+    out = subprocess.run(cmd + [str(r.get("kind") or "Notification").capitalize(), body],
+                         capture_output=True, text=True, timeout=3600).stdout.strip()
+    if out == "open":
+        subprocess.Popen(["nc-as-user", "xdg-open", f"http://localhost:{SIGNIN_PORT}/open?next={urllib.parse.quote(target)}"])
+
+
 class SignIn(http.server.BaseHTTPRequestHandler):
     """http://localhost:8009/open?next=/talk: signs this browser in to the desk's
     object server as the desk user and goes there. The object server has no
@@ -796,6 +838,8 @@ class SignIn(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         u = urllib.parse.urlsplit(self.path)
         host = (self.headers.get("Host") or "").split(":")[0]
+        if u.path == "/search" and host in ("localhost", "127.0.0.1"):
+            return self.search(urllib.parse.parse_qs(u.query).get("q", [""])[0])
         nxt = urllib.parse.parse_qs(u.query).get("next", ["/"])[0]
         if u.path != "/open" or host not in ("localhost", "127.0.0.1") or \
                 not nxt.startswith("/") or nxt.startswith("//") or "\\" in nxt:
@@ -811,8 +855,33 @@ class SignIn(http.server.BaseHTTPRequestHandler):
         self.send_header("Location", f"http://{host}:8001{nxt}")
         self.end_headers()
 
+    def search(self, q):
+        """/search?q=...: the desk user's records matching q, for the launcher:
+        [{title, collection, path}]."""
+        out = []
+        try:
+            res = SEARCHER.get(f"/api/search?q={urllib.parse.quote(q)}&limit=20").get("results") or {}
+            for coll, rows in res.items():
+                for r in rows or []:
+                    rid = r.get("id") or r.get("record_id")
+                    title = (r.get("title") or r.get("name") or r.get("content") or r.get("body")
+                             or r.get("filename") or rid)
+                    out.append({"title": str(title)[:120], "collection": coll,
+                                "path": f"/{coll}/{rid}" if coll in ("notes", "tasks") else f"/{coll}"})
+        except Exception as e:
+            out = [{"title": f"search failed: {e}", "collection": "", "path": "/"}]
+        body = json.dumps(out).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def log_message(self, *a):
         pass
+
+
+SEARCHER = None   # the voice's object server session, shared with the launcher
 
 
 def serve_signin():
@@ -829,6 +898,9 @@ def main():
         sys.exit("nc-voice: DBBASIC_ADMIN_TOKEN is not set")
     threading.Thread(target=serve_signin, daemon=True).start()
     v = Voice()
+    global SEARCHER
+    SEARCHER = v.obj
+    threading.Thread(target=notifications, args=(v.obj,), daemon=True).start()
     while True:   # follow nc-host's command stream; reconnect when it restarts
         try:
             c = UnixHTTP(SOCK)

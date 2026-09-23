@@ -1,7 +1,8 @@
 [Desktop Entry]
 Type=Application
-Name=Files (object server)
+Name=Files
 Comment=Your files in the object server
-Exec=xdg-open http://localhost:8009/open?next=/files
+Exec=nc-webapp "Files" http://localhost:8009/open?next=/files folder-remote
 Icon=folder-remote
+StartupWMClass=nc-files
 Categories=Network;Office;

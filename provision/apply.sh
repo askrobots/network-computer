@@ -80,10 +80,11 @@ deps() {
     rendezvous) echo /etc/systemd/system/nc-rendezvous.service /etc/systemd/system/nc-rendezvous.service.d/*.conf /usr/local/bin/nc-rendezvous /etc/nc/env ;;
     host)       echo /etc/systemd/system/nc-host.service /etc/systemd/system/nc-host.service.d/*.conf /usr/local/bin/nc-host /etc/nc/env ;;
     object-server) echo /etc/systemd/system/nc-object-server.service /etc/systemd/system/nc-object-server.service.d/*.conf /etc/nc/object-server.env /opt/dbbasic-object-server/.git/HEAD /opt/dbbasic-object-server/.git/refs/heads/main ;;
+    object-daemon) echo /etc/systemd/system/nc-object-daemon.service /etc/systemd/system/nc-object-daemon.service.d/*.conf /etc/nc/object-server.env /opt/dbbasic-object-server/.git/refs/heads/main ;;
     voice)      echo /etc/systemd/system/nc-voice.service /etc/systemd/system/nc-voice.service.d/*.conf /usr/local/bin/nc-voice /etc/nc/object-server.env /opt/piper/voices/en_US-lessac-medium.onnx.json ;;
   esac
 }
-snapshot() { for s in xorg desktop audio rendezvous host object-server voice; do echo "$s $(cat $(deps $s) 2>/dev/null | md5sum | cut -c1-12)"; done; }
+snapshot() { for s in xorg desktop audio rendezvous host object-server object-daemon voice; do echo "$s $(cat $(deps $s) 2>/dev/null | md5sum | cut -c1-12)"; done; }
 BEFORE=$(snapshot)
 
 echo ">> packages"
@@ -233,13 +234,13 @@ echo ">> Piper (local text to speech for nc-voice)"
 /opt/piper/bin/python -c 'import piper' 2>/dev/null || /opt/piper/bin/pip install -q piper-tts
 install -d /opt/piper/voices
 [ -s /opt/piper/voices/en_US-lessac-medium.onnx ] || ( cd /opt/piper/voices && /opt/piper/bin/python -m piper.download_voices en_US-lessac-medium >/dev/null 2>&1 )
-for s in nc-object-server nc-voice; do
+for s in nc-object-server nc-object-daemon nc-voice; do
   install -d /etc/systemd/system/$s.service.d
   printf '[Service]\nUser=%s\nGroup=%s\n' "$NC_DESK_USER" "$NC_DESK_USER" > /etc/systemd/system/$s.service.d/user.conf
 done
 
 # services that read the desk wait for it at boot
-for s in nc-desktop nc-host nc-rendezvous nc-object-server nc-voice; do
+for s in nc-desktop nc-host nc-rendezvous nc-object-server nc-object-daemon nc-voice; do
   install -d /etc/systemd/system/$s.service.d
   if [ -n "$DESK" ]; then
     printf '[Unit]\nRequiresMountsFor=/desk\n' > /etc/systemd/system/$s.service.d/desk.conf
@@ -257,7 +258,7 @@ ufw --force enable >/dev/null
 echo ">> services"
 AFTER=$(snapshot)
 systemctl daemon-reload
-for s in xorg desktop audio rendezvous host object-server voice; do
+for s in xorg desktop audio rendezvous host object-server object-daemon voice; do
   was=$(echo "$BEFORE" | awk -v s=$s '$1==s{print $2}')
   now=$(echo "$AFTER"  | awk -v s=$s '$1==s{print $2}')
   if [ "$was" != "$now" ] && systemctl is-active --quiet nc-$s; then
@@ -267,9 +268,9 @@ for s in xorg desktop audio rendezvous host object-server voice; do
     [ $s = audio ] && systemctl is-active --quiet nc-host && systemctl restart nc-host
   fi
 done
-systemctl enable --now nc-xorg nc-desktop nc-audio nc-rendezvous nc-host nc-object-server nc-voice
+systemctl enable --now nc-xorg nc-desktop nc-audio nc-rendezvous nc-host nc-object-server nc-object-daemon nc-voice
 sleep 4
-systemctl is-active nc-xorg nc-desktop nc-audio nc-rendezvous nc-host nc-object-server nc-voice | paste -sd' ' -
+systemctl is-active nc-xorg nc-desktop nc-audio nc-rendezvous nc-host nc-object-server nc-object-daemon nc-voice | paste -sd' ' -
 nc-object-bootstrap || echo "!! object server bootstrap failed"
 # session settings (Alt+Space...) apply at every login; apply them to the running session now
 for i in 1 2 3 4 5; do nc-session-setup >/dev/null 2>&1 && break; sleep 2; done

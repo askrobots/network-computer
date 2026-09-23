@@ -34,3 +34,4 @@ wmctrl
 espeak-ng
 python3-venv
 conky-std
+gir1.2-webkit2-4.1

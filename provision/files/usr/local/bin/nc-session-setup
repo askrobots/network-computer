@@ -12,11 +12,15 @@ echo "shortcuts: Alt+Space search and launch; Shift+Alt+Space window menu"
 # an Object Server icon on the desktop, once (the user may delete it), marked
 # trusted so Xfce opens it without the "untrusted launcher" question
 D=$(xdg-user-dir DESKTOP 2>/dev/null || echo "$HOME/Desktop"); L="$D/Object Server.desktop"
+if [ -e "$L" ] && grep -q '^Exec=xdg-open http://localhost:8009' "$L"; then rm -f "$L" "$HOME/.config/nc/object-icon-placed"; fi   # the old browser-tab version
 if [ ! -e "$L" ] && [ ! -e "$HOME/.config/nc/object-icon-placed" ]; then
   cp /usr/share/applications/nc-object-home.desktop "$L" && chmod +x "$L" &&
     gio set -t string "$L" metadata::xfce-exe-checksum "$(sha256sum "$L" | cut -d' ' -f1)" 2>/dev/null
   mkdir -p "$HOME/.config/nc" && touch "$HOME/.config/nc/object-icon-placed"
 fi
+
+# notifications bottom right: top right is where browser tabs and window buttons are
+xfconf-query -c xfce4-notifyd -p /notify-location -n -t int -s 3 2>/dev/null || xfconf-query -c xfce4-notifyd -p /notify-location -s 3
 
 # a plain background, once: it streams far cheaper than a detailed picture, and the
 # dashboard sits on it (the user can pick any wallpaper afterwards)

@@ -1,7 +1,8 @@
 [Desktop Entry]
 Type=Application
-Name=Talk (object server)
+Name=Talk
 Comment=The object server voice page
-Exec=xdg-open http://localhost:8009/open?next=/talk
+Exec=nc-webapp "Talk" http://localhost:8009/open?next=/talk audio-input-microphone
 Icon=audio-input-microphone
+StartupWMClass=nc-talk
 Categories=Network;Office;
