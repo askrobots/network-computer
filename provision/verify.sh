@@ -44,6 +44,7 @@ check "screen resize helper installed"   sh -c 'command -v nc-display && command
 check "xdotool installed"                command -v xdotool
 
 echo "desktop polish"
+check "cloud config drive hidden from the desktop" sh -c 'd=$(blkid -L config-2) || exit 0; udevadm info --query=property --name="$d" | grep -qx UDISKS_IGNORE=1'
 check "mousepad word wrap on"            sh -c '[ "$(gsettings get org.xfce.mousepad.preferences.view word-wrap)" = true ]'
 
 echo "network"

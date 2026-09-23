@@ -1,0 +1,4 @@
+# DigitalOcean's cloud-init config drive (label "config-2") holds first-boot
+# metadata and nothing for the desktop user. Keep it out of the file manager
+# and off the desktop, where it only showed up as a disk that fails to mount.
+ENV{ID_FS_LABEL}=="config-2", ENV{UDISKS_IGNORE}="1"

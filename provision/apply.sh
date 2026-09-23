@@ -104,6 +104,8 @@ cp -a files/usr/. /usr/
 rm -f /etc/pulse/client.conf.d/01-enable-autospawn.conf
 dconf update || true
 sysctl -p /etc/sysctl.d/99-nc-noipv6.conf >/dev/null 2>&1 || true
+udevadm control --reload-rules 2>/dev/null || true
+udevadm trigger --subsystem-match=block 2>/dev/null || true   # re-evaluate disks (hide the config drive)
 modprobe uinput || true
 echo uinput > /etc/modules-load.d/uinput.conf
 
