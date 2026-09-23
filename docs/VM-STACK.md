@@ -99,6 +99,11 @@ own user with least privilege, and its key lives in the VM's secret store.
 - The AI sees both sides: data through MCP, the screen through the network computer.
 - `DBBASIC.md` in every project ties build, install, desktop entry and publishing together.
 
+## Desks
+
+Storage by lifecycle, hot desking, and automatic start and stop are planned in
+[DESKS.md](DESKS.md). Models live on a separate `models` volume there.
+
 ## Sizing
 
 Desktop + object server + whisper wants more than today's 2 vCPU / 4 GB:

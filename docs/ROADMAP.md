@@ -47,6 +47,12 @@ The Flutter apps built for macOS could be built and tested here too:
 - Or use the host as a build/test box in CI-like fashion.
 Wire this into the provisioning (Flutter SDK) and try one app end to end.
 
+## 7. Desks and hot desking
+Disposable computers of any size, a persistent desk (settings, keys, documents, models) split
+into volumes by lifecycle, and a controller that stops idle desks and wakes them on connect,
+schedule or AI task. What companies, travelers and salespeople need from it, with hourly
+costs: [DESKS.md](DESKS.md).
+
 ## Near-term order (suggested)
 1. Stand up a Dallas or Houston-LZ host, measure the latency win.
 2. Get the client onto a real iPad; tune the desktop for it.

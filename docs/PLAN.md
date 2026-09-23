@@ -211,3 +211,9 @@ which matters as soon as the phone both hears the desktop and sends its mic.
   removes the round trip plus encode and decode latency from every mouse movement.
 - **Stats overlay** should be collapsible or moved to a corner; it sits over the desktop.
   The user asked for it to stay as is until Firefox and audio testing are finished.
+
+## Later plans
+- [ROADMAP.md](ROADMAP.md): closer host, iPad, AI with voice, curated desktop, dbbasic ecosystem.
+- [VM-STACK.md](VM-STACK.md): voice AI, the dbbasic apps and the object server on one VM.
+- [DESKS.md](DESKS.md): hot desking, storage by lifecycle, automatic start and stop, and what
+  companies, travelers and salespeople need.
