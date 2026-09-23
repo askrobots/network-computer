@@ -218,5 +218,7 @@ which matters as soon as the phone both hears the desktop and sends its mic.
 ## Later plans
 - [ROADMAP.md](ROADMAP.md): closer host, iPad, AI with voice, curated desktop, dbbasic ecosystem.
 - [VM-STACK.md](VM-STACK.md): voice AI, the dbbasic apps and the object server on one VM.
+- [DESKTOP.md](DESKTOP.md): clipboard, files and shared folders, Mac shortcuts, a look that
+  streams well, session restore.
 - [DESKS.md](DESKS.md): hot desking, storage by lifecycle, automatic start and stop, and what
   companies, travelers and salespeople need.

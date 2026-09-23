@@ -28,6 +28,8 @@ the screen back. The vision extends it:
   shell needs a dedicated user, least privilege, and clear on/off control.
 
 ## 4. A curated, remote-first Linux desktop
+Detailed plan (clipboard, files, shortcuts, streaming-friendly look, session restore):
+[DESKTOP.md](DESKTOP.md).
 Make the streamed desktop feel better than a local one for this use. Ship it as
 declarative prefs in `provision/` (already started with dconf defaults):
 - Find and standardize on the best apps for remote use (editor, terminal, browser,
