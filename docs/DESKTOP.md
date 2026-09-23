@@ -112,6 +112,14 @@ you, thinking) and every turn: what it heard, what it said, what it did.
   service keys by `nc-object-bootstrap` (never printed).
 - Tested with synthesized speech: "What time is it?" answered correctly (about 9 s
   including the spoken reply); "Open the text editor" opened Mousepad (about 6 s).
+- **It looks at the screen only when it needs to.** The AI has a `look` action for
+  questions about what is inside a window ("what does my note say", "what's this
+  error"); the window list gives only titles. Then one screenshot (JPEG, at most 1280
+  wide) is attached to that one question, not kept in the history, and deleted from the
+  object server right after; the panel shows "👁 looked at the screen" each time. Plain
+  questions and commands never send the screen. The model is Claude Sonnet 5: Haiku was
+  0.6 s quicker but read the screenshot right 2 times in 5, Sonnet 4 in 4. A screen
+  question takes about 6 s; a plain one about 2 s.
 
 Speed (measured per step, after the end of speech, synthesized questions): speech to
 text 0.6–1.2 s, AI 0.8–1.2 s, then speech now comes from **Piper** on the desk (open

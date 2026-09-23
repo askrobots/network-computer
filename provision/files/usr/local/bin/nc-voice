@@ -13,7 +13,8 @@ Standard library only. Configuration from the environment:
   DBBASIC_ADMIN_TOKEN   the object server's admin token (to open a session)
   NC_DESK_USER          the object server user to act as (default: this user)
   NC_OBJECT_SERVER      default http://127.0.0.1:8001
-  NC_VOICE_MODEL        default anthropic:claude-haiku-4-5
+  NC_VOICE_MODEL        default anthropic:claude-sonnet-5 (Haiku is ~0.6 s quicker but
+                        read screenshots right 2 times in 5; Sonnet 4 in 4)
   NC_VOICE_TTS          piper (default when installed: local, starts speaking in
                         about half a second), openai, or local (espeak)
   NC_PIPER_VOICE        default /opt/piper/voices/en_US-lessac-medium.onnx
@@ -41,7 +42,7 @@ import wave
 OBJ = os.environ.get("NC_OBJECT_SERVER", "http://127.0.0.1:8001").rstrip("/")
 ADMIN = os.environ.get("DBBASIC_ADMIN_TOKEN", "")
 USER = os.environ.get("NC_DESK_USER") or os.environ.get("USER", "")
-MODEL = os.environ.get("NC_VOICE_MODEL", "anthropic:claude-haiku-4-5")
+MODEL = os.environ.get("NC_VOICE_MODEL", "anthropic:claude-sonnet-5")
 try:   # Piper: fast local speech; present when nc-voice runs on /opt/piper's python
     from piper import PiperVoice
 except ImportError:
@@ -131,11 +132,29 @@ class ObjectServer:
         data, _ = self.call("/api/stt", wav, "audio/wav")
         return json.loads(data).get("text", "").strip()
 
-    def chat(self, message, history, system):
-        body = json.dumps({"message": message, "model": MODEL, "system": system,
-                           "history": history}).encode()
+    def chat(self, message, history, system, attachments=None):
+        req = {"message": message, "model": MODEL, "system": system, "history": history}
+        if attachments:
+            req["attachments"] = attachments
+        body = json.dumps(req).encode()
         data, _ = self.call("/api/ai/chat", body, "application/json", timeout=90)
         return json.loads(data).get("reply", "")
+
+    def upload(self, name, data, ctype):
+        """Store a file as the user's; returns its id (chat attachments are file ids)."""
+        b = "ncvoice" + os.urandom(8).hex()
+        body = (f"--{b}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{name}\"\r\n"
+                f"Content-Type: {ctype}\r\n\r\n").encode() + data + f"\r\n--{b}--\r\n".encode()
+        res, _ = self.call("/api/files", body, f"multipart/form-data; boundary={b}")
+        return json.loads(res)["file"]["id"]
+
+    def delete_file(self, file_id):
+        try:
+            req = urllib.request.Request(f"{OBJ}/api/files/{file_id}", method="DELETE",
+                                         headers={"Authorization": "Bearer " + self.token})
+            urllib.request.urlopen(req, timeout=10).read()
+        except (OSError, urllib.error.HTTPError):
+            pass
 
     def tts(self, text):
         body = json.dumps({"text": text[:800], "engine": TTS}).encode()
@@ -148,6 +167,16 @@ class ObjectServer:
 def desk(*cmd, timeout=10):
     """Run a command in the desk user's desktop session."""
     return subprocess.run(["nc-as-user", *cmd], capture_output=True, text=True, timeout=timeout)
+
+
+def screenshot():
+    """The desk's screen as a JPEG, at most 1280 wide: enough to read, cheap to send."""
+    r = subprocess.run(["nc-as-user", "ffmpeg", "-loglevel", "error", "-f", "x11grab", "-i", ":0",
+                        "-frames:v", "1", "-vf", "scale='min(1280,iw)':-2", "-q:v", "4",
+                        "-f", "image2", "-c:v", "mjpeg", "pipe:1"], capture_output=True, timeout=15)
+    if r.returncode != 0 or not r.stdout:
+        raise RuntimeError("could not take a screenshot")
+    return r.stdout
 
 
 def open_windows():
@@ -265,6 +294,12 @@ Actions, done in order:
   {"do": "type", "text": "<text to type into the focused window>"}
   {"do": "keys", "keys": "<xdotool key names, e.g. ctrl+s or Return>"}
   {"do": "search", "query": "<text>"}   (opens the desk's search bar with this query)
+  {"do": "look"}   when you must see what is on the screen to answer or act: reading or
+                   describing anything inside a window ("what does my note say", "what's
+                   this error", "what am I looking at"). The window list gives only titles,
+                   never contents. Put look last, after e.g. a switch to the right window,
+                   with "say" empty; you then get a screenshot and answer again. Don't look
+                   for anything the window list or the question already tells you.
 Use no actions when they are just talking or asking something. When you take actions,
 keep "say" to a few words ("Opening Firefox.") or leave it empty.
 Each message ends with the desktop as it is right now (open windows). Trust that over
@@ -272,6 +307,14 @@ anything said earlier: the user opens and closes windows themselves. When asked 
 something, use open_app even if you opened it before (it switches to it if it is open). Web searches: open a
 URL such as https://duckduckgo.com/?q=... . Their files are in ~/Desktop and
 ~/Documents. Speech recognition makes mistakes: guess the likely meaning."""
+
+
+# After a look: the same instructions without the look action, and saying the
+# screenshot is here (with look still offered, it kept asking to look again).
+SYSTEM_LOOKED = re.sub(r'  \{"do": "look"\}.*?screenshot and answer again\. Don\'t look\n.*?already tells you\.\n', '',
+                       SYSTEM, flags=re.S) + """
+This message comes with a screenshot of the user's screen as it is right now. Answer
+from what you see in it; you can read text in it."""
 
 
 def context():
@@ -420,6 +463,27 @@ class Voice:
         reply = self.obj.chat(text + "\n\n" + context(), self.history[-12:], SYSTEM)
         mark("ai")
         say, actions = parse_reply(reply)
+        if any(a.get("do") == "look" for a in actions):   # it needs to see: one screenshot, this turn only
+            for a in actions[:next(i for i, a in enumerate(actions) if a.get("do") == "look")]:
+                try:   # e.g. switch to the window first, so the screenshot shows it
+                    event("did", act(a))
+                except Exception as e:
+                    event("error", str(e))
+            time.sleep(0.4)
+            event("did", "👁 looked at the screen")
+            shot = screenshot()
+            fid = self.obj.upload("screen.jpg", shot, "image/jpeg")
+            try:
+                reply = self.obj.chat("[Screenshot attached.] " + text + "\n\n" + context(),
+                                      self.history[-12:], SYSTEM_LOOKED, attachments=[fid])
+            finally:
+                self.obj.delete_file(fid)
+            mark("look")
+            log("after looking: " + reply[:300].replace("\n", " "))
+            say, actions = parse_reply(reply)
+            actions = [a for a in actions if a.get("do") != "look"]
+            if not say and not actions:
+                say = "I looked, but I couldn't tell."
 
         def do_actions():
             for a in actions:
