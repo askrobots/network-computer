@@ -4,3 +4,5 @@ acme-cache/
 
 # local desk defaults (domain, names)
 infra/desk.env
+__pycache__/
+*.pyc
