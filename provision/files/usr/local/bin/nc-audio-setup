@@ -1,0 +1,18 @@
+#!/bin/sh
+# Virtual audio devices for network-computer. Runs after pulseaudio starts
+# (nc-audio.service ExecStartPost), so it sees a fresh daemon every time.
+#   nc        desktop output. nc-host streams its monitor to the client.
+#   nc-mic    nc-host plays the client's microphone into this sink.
+#   nc-mic-in a source remapped from nc-mic's monitor, so every desktop app
+#             sees an ordinary microphone called "Phone microphone".
+# nc-mic is separate from nc, so the phone never hears its own voice back.
+set -e
+for i in $(seq 1 40); do pactl info >/dev/null 2>&1 && break; sleep 0.25; done
+pactl load-module module-null-sink sink_name=nc rate=48000 channels=2 \
+  sink_properties=device.description=Network-computer-output
+pactl load-module module-null-sink sink_name=nc-mic rate=48000 channels=2 \
+  sink_properties=device.description=Phone-microphone-feed
+pactl load-module module-remap-source master=nc-mic.monitor source_name=nc-mic-in \
+  source_properties=device.description=Phone-microphone
+pactl set-default-sink nc
+pactl set-default-source nc-mic-in

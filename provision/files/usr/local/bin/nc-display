@@ -1,0 +1,33 @@
+#!/bin/sh
+# Resize the headless X screen and set the desktop's UI scale.
+#   nc-display <width> <height> [scale]      e.g. nc-display 1920 1080 1.25
+# nc-host runs this when a client asks for a screen size; safe to run by hand.
+set -e
+W=${1:?usage: nc-display <width> <height> [scale]}; H=${2:?usage: nc-display <width> <height> [scale]}; S=${3:-1}
+export DISPLAY=:0
+
+OUT=$(xrandr -q | awk '$2=="connected"{print $1; exit}')
+[ -n "$OUT" ] || { echo "nc-display: no connected output on $DISPLAY"; exit 1; }
+MODE="${W}x${H}"
+if ! xrandr -q | awk '{print $1}' | grep -qx "$MODE"; then
+  # the screen lacks this size: add a mode with standard (reduced-blanking) timings
+  ML=$(cvt -r "$W" "$H" 60 2>/dev/null | sed -n 's/^Modeline "[^"]*" *//p')
+  [ -n "$ML" ] || ML=$(cvt "$W" "$H" 60 | sed -n 's/^Modeline "[^"]*" *//p')
+  xrandr --newmode "$MODE" $ML 2>/dev/null || true
+  xrandr --addmode "$OUT" "$MODE"
+fi
+xrandr --output "$OUT" --mode "$MODE"
+
+# UI scale, applied live through the desktop session's own settings daemon
+. /etc/nc/env 2>/dev/null || true
+U=${NC_DESK_USER:-user}
+PID=$(pgrep -u "$U" -x xfce4-session | head -1 || true)
+[ -n "$PID" ] || { echo "screen $MODE on $OUT; no desktop session for $U, scale not applied"; exit 0; }
+BUS=$(tr '\0' '\n' < "/proc/$PID/environ" | sed -n 's/^DBUS_SESSION_BUS_ADDRESS=//p')
+# whole-number scales use GTK window scaling; the remainder scales fonts (dpi)
+WSF=$(awk -v s="$S" 'BEGIN{print (s>=2) ? int(s) : 1}')
+DPI=$(awk -v s="$S" -v w="$WSF" 'BEGIN{printf "%d", 96*s/w + 0.5}')
+q() { runuser -u "$U" -- env DISPLAY=:0 DBUS_SESSION_BUS_ADDRESS="$BUS" xfconf-query -c xsettings "$@"; }
+q -n -p /Gdk/WindowScalingFactor -t int -s "$WSF"
+q -n -p /Xft/DPI -t int -s "$DPI"
+echo "screen $MODE on $OUT, scale $S (window scaling ${WSF}x, ${DPI} dpi)"

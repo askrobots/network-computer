@@ -1,0 +1,6 @@
+#!/bin/sh
+# Live waveform of the phone's microphone as this desktop hears it.
+# -volume 0: draw the wave without playing it back (no echo to the phone).
+exec ffplay -hide_banner -loglevel error -fflags nobuffer \
+  -f pulse -i nc-mic-in -showmode waves -volume 0 \
+  -window_title "Phone microphone" -x 900 -y 320

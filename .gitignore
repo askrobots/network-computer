@@ -1,4 +1,4 @@
-bin/
+/bin/
 acme-cache/
 *.h264
 
