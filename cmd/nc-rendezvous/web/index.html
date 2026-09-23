@@ -717,6 +717,16 @@ function flushClip(){
   const t=clipPending;
   navigator.clipboard.writeText(t).then(()=>{ if(clipPending===t) clipPending=null; toast('Copied to this device'); }).catch(()=>{});
 }
+// The ^V button: no paste event here, so ask for the clipboard (Safari shows
+// a small Paste button to confirm, Chrome asks once for permission).
+async function pasteButton(){
+  let text='';
+  try{ text=await navigator.clipboard.readText(); }catch(e){}
+  if(!ctlOpen()) return;
+  if(text) sendClip(text);
+  toast(text ? 'Pasted from this device' : "Pasted the desk's clipboard (no text here to send)");
+  for(const [t,code] of [['kd','ControlLeft'],['kd','KeyV'],['ku','KeyV'],['ku','ControlLeft']]) ctl.send(JSON.stringify({t,code}));
+}
 function isShortcut(e,code,...codes){ return codes.includes(code)&&(e.ctrlKey||(e.metaKey&&cmdIsCtrl()))&&!e.altKey; }
 
 /* ---------- fullscreen ---------- */
@@ -734,8 +744,10 @@ $('#b-keys').onclick=()=>{
 document.querySelectorAll('#keys .key').forEach(k=>{
   k.onclick=e=>{
     e.preventDefault();
+    if(k.dataset.combo==='ControlLeft+KeyV'&&ctlOpen()){ pasteButton(); return; }
     if(k.dataset.combo){
       const codes=k.dataset.combo.split('+');
+      if(k.dataset.combo==='ControlLeft+KeyC'&&ctlOpen()) startCopy();  // a tap counts as a gesture, like a key press
       codes.forEach(c=>sendKey('kd',c));
       codes.slice().reverse().forEach(c=>sendKey('ku',c));
       return;
