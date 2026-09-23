@@ -65,6 +65,22 @@ Every pixel that changes costs bandwidth, and fine detail costs sharpness:
   video compression smears), and a clear UI and terminal font;
 - measure before and after with the stats panel (bitrate on an idle desktop).
 
+### Idea: the background is a dashboard
+
+Instead of a picture, the desktop background shows the desk's state at a glance:
+
+- desk volume used and free (it is small, so this matters), the machine's own disk;
+- CPU, memory, uptime;
+- what this computer has cost so far and per hour, and when it will auto-stop;
+- the connection: direct or relayed, round trip, bitrate;
+- recent clipboard and file transfers, and which API keys are set (names only, never values).
+
+It fits "a look that streams well" as long as it changes rarely: redraw every 30 to 60
+seconds, flat colors, no animation, so an idle desk still costs almost no bandwidth.
+Candidates: conky (draws on the root window, open source, light), or a small script that
+renders an image and sets it as the wallpaper. The numbers nc-host already knows
+(path, round trip, bitrate) could be written to a file for it to read.
+
 ## 5. Your session comes back
 
 Windows, terminal sessions (`tmux` on the desk) and Firefox tabs restored after a rebuild,
