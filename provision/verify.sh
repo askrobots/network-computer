@@ -31,7 +31,7 @@ check "phone mic is the default input"   sh -c '[ "$(pactl get-default-source)" 
 check "host plays client mic (-mic-device)" sh -c 'systemctl cat nc-host | grep -q -- "-mic-device nc-mic"'
 check "waveform launcher installed"      sh -c 'command -v ffplay && command -v nc-mic-scope && test -f /usr/share/applications/nc-mic-scope.desktop'
 check "sound recorder (Audacity) installed" command -v audacity
-check "ALSA apps route to pulse"         sh -c 'arecord -L 2>/dev/null | grep -qx pulse || arecord -L 2>/dev/null | grep -q "^default"'
+check "ALSA apps record from pulse"      sh -c 'timeout 5 arecord -q -D default -d 1 -f S16_LE -r 48000 -c 2 /dev/null'
 check "pavucontrol installed"            command -v pavucontrol
 check "no pulse autospawn override"      sh -c '! test -e /etc/pulse/client.conf.d/01-enable-autospawn.conf'
 

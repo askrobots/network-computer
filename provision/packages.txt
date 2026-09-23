@@ -8,6 +8,7 @@ pavucontrol
 # sees the phone microphone and plays to the desktop speaker)
 audacity
 libasound2-plugins
+alsa-utils
 # Headless desktop
 xserver-xorg-core
 xserver-xorg-video-dummy
