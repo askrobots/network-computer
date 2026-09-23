@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"time"
 
@@ -160,6 +161,7 @@ func main() {
 	type stats struct {
 		packets, bytes, frames, keyframes int
 		audioPackets, audioBytes          int
+		audioGaps                         []time.Duration // time between audio packets
 		first                             time.Time
 	}
 	st := &stats{}
@@ -169,11 +171,17 @@ func main() {
 		log.Printf("track: %s %s", track.Kind(), track.Codec().MimeType)
 		if track.Kind() != webrtc.RTPCodecTypeVideo {
 			go func() {
+				var last time.Time
 				for {
 					pkt, _, err := track.ReadRTP()
 					if err != nil {
 						return
 					}
+					now := time.Now()
+					if !last.IsZero() {
+						st.audioGaps = append(st.audioGaps, now.Sub(last))
+					}
+					last = now
 					st.audioPackets++
 					st.audioBytes += len(pkt.Payload)
 				}
@@ -283,6 +291,19 @@ func main() {
 		st.packets, st.frames, st.keyframes, float64(st.frames)/el, float64(st.bytes)*8/el/1e6, el)
 	if st.audioPackets > 0 {
 		fmt.Printf("audio: %d packets, %.0f kbit/s (opus, ~50 packets/s expected)\n", st.audioPackets, float64(st.audioBytes)*8/el/1e3)
+		if g := st.audioGaps; len(g) > 10 {
+			sort.Slice(g, func(i, j int) bool { return g[i] < g[j] })
+			pct := func(p float64) time.Duration { return g[int(p*float64(len(g)-1))] }
+			bursts := 0
+			for _, d := range g {
+				if d < 5*time.Millisecond {
+					bursts++
+				}
+			}
+			fmt.Printf("audio timing: gaps p10 %v, p50 %v, p90 %v, p99 %v, max %v; %.0f%% arrive <5ms apart (bursts). 20ms each = smooth\n",
+				pct(.10).Round(100*time.Microsecond), pct(.5).Round(100*time.Microsecond), pct(.9).Round(100*time.Microsecond),
+				pct(.99).Round(100*time.Microsecond), g[len(g)-1].Round(100*time.Microsecond), 100*float64(bursts)/float64(len(g)))
+		}
 	} else {
 		fmt.Println("audio: none received (host started without -audio-device, or nothing playing)")
 	}
