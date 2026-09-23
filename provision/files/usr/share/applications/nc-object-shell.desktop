@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Shell (object server)
+Comment=Commands and AI chat in the object server
+Exec=xdg-open http://localhost:8009/open?next=/shell
+Icon=utilities-terminal
+Categories=Network;Office;

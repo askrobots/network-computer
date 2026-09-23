@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Object Server
+Comment=Your DBBASIC object server on this desk: apps, records, files
+Exec=xdg-open http://localhost:8009/open?next=/
+Icon=applications-internet
+Categories=Network;Office;

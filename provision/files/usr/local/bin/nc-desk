@@ -1,0 +1,315 @@
+#!/usr/bin/env python3
+"""nc-desk: control the desktop from a script, a voice, or an AI agent.
+
+Every command prints one JSON object, {"ok": true, ...} or {"ok": false,
+"error": "..."}, and exits 0 or 1. Runs as the desk user in the desktop
+session (from root, or without a display, it re-runs itself through nc-as-user).
+
+Windows
+  nc-desk windows                          open windows: id, title, class, x, y, w, h
+  nc-desk arrange WINDOW left|right|top|bottom|max|restore|center|min|close
+  nc-desk place WINDOW X Y W H             exact position and size
+  nc-desk focus WINDOW
+Mouse and keyboard (screen pixels; `nc-desk screen` gives the size)
+  nc-desk click X Y [left|right|middle] [double]
+  nc-desk drag X1 Y1 X2 Y2
+  nc-desk scroll X Y up|down [STEPS]
+  nc-desk type TEXT
+  nc-desk key COMBO...                     xdotool names: ctrl+s, Return, alt+Tab
+Screen
+  nc-desk screen                           size and work area (without the panel)
+  nc-desk screenshot FILE [MAXWIDTH]       JPEG; prints the scale from image to screen
+Files (only inside the home folder; never overwrites; Trash can be undone)
+  nc-desk ls [PATH] [GLOB]
+  nc-desk mkdir PATH
+  nc-desk move SRC... DEST                 DEST: a folder, or a new name for one SRC
+  nc-desk copy SRC... DEST
+  nc-desk trash PATH...
+
+WINDOW is part of a window's title or class, case-insensitive ("firefox",
+"Mousepad"), or an id from `nc-desk windows`.
+"""
+import fnmatch
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+
+HOME = os.path.expanduser("~")
+
+
+class Fail(Exception):
+    pass
+
+
+def run(*cmd, check=True):
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    if check and r.returncode != 0:
+        raise Fail(f"{cmd[0]}: {(r.stderr or r.stdout).strip() or 'failed'}")
+    return r.stdout
+
+
+# ---------- windows ----------
+
+def windows():
+    out = []
+    geo = {}
+    for line in run("wmctrl", "-lG").splitlines():
+        p = line.split(None, 7)
+        if len(p) == 8:
+            geo[p[0]] = [int(v) for v in p[2:6]]
+    for line in run("wmctrl", "-lx").splitlines():
+        p = line.split(None, 4)
+        if len(p) < 5 or p[1] == "-1":        # -1: sticky (panel, desktop)
+            continue
+        wid, cls, title = p[0], p[2], p[4]
+        x, y, w, h = geo.get(wid, [0, 0, 0, 0])
+        out.append({"id": wid, "title": title, "class": cls, "x": x, "y": y, "w": w, "h": h})
+    return out
+
+
+def find_window(spec):
+    wins = windows()
+    for w in wins:
+        if w["id"] == spec:
+            return w
+    s = spec.lower()
+    hits = [w for w in wins if s in w["title"].lower() or s in w["class"].lower()]
+    if not hits:
+        raise Fail(f"no window like {spec!r}")
+    return hits[0]
+
+
+def work_area():
+    """The usable screen: without the panel."""
+    out = run("xprop", "-root", "_NET_WORKAREA", check=False)
+    m = re.search(r"=\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+)", out)
+    if m:
+        return [int(v) for v in m.groups()]
+    w, h = screen_size()
+    return [0, 0, w, h]
+
+
+def screen_size():
+    m = re.search(r"dimensions:\s+(\d+)x(\d+)", run("xdpyinfo"))
+    return int(m.group(1)), int(m.group(2))
+
+
+def unmax(wid):
+    run("wmctrl", "-i", "-r", wid, "-b", "remove,maximized_vert,maximized_horz", check=False)
+
+
+def place(wid, x, y, w, h):
+    unmax(wid)
+    run("wmctrl", "-i", "-r", wid, "-e", f"0,{x},{y},{w},{h}")
+    run("wmctrl", "-i", "-a", wid)
+
+
+def arrange(spec, how):
+    win = find_window(spec)
+    wid = win["id"]
+    X, Y, W, H = work_area()
+    if how == "max":
+        run("wmctrl", "-i", "-r", wid, "-b", "add,maximized_vert,maximized_horz")
+        run("wmctrl", "-i", "-a", wid)
+    elif how == "restore":
+        unmax(wid)
+    elif how == "min":
+        run("xdotool", "windowminimize", str(int(wid, 16)))
+    elif how == "close":
+        run("wmctrl", "-i", "-c", wid)
+    elif how == "left":
+        place(wid, X, Y, W // 2, H)
+    elif how == "right":
+        place(wid, X + W // 2, Y, W - W // 2, H)
+    elif how == "top":
+        place(wid, X, Y, W, H // 2)
+    elif how == "bottom":
+        place(wid, X, Y + H // 2, W, H - H // 2)
+    elif how == "center":
+        w, h = min(win["w"] or W * 2 // 3, W), min(win["h"] or H * 2 // 3, H)
+        place(wid, X + (W - w) // 2, Y + (H - h) // 2, w, h)
+    else:
+        raise Fail(f"arrange how? {how!r}")
+    return {"window": win["title"], "arranged": how}
+
+
+# ---------- mouse and keyboard ----------
+
+BUTTONS = {"left": "1", "middle": "2", "right": "3"}
+
+
+def click(x, y, button="left", double=""):
+    b = BUTTONS.get(button)
+    if not b:
+        raise Fail(f"button? {button!r}")
+    cmd = ["xdotool", "mousemove", "--sync", str(int(x)), str(int(y)), "click"]
+    if double == "double":
+        cmd += ["--repeat", "2", "--delay", "80"]
+    run(*cmd, b)
+    return {"clicked": [int(x), int(y)], "button": button, "double": double == "double"}
+
+
+def drag(x1, y1, x2, y2):
+    run("xdotool", "mousemove", "--sync", str(int(x1)), str(int(y1)), "mousedown", "1",
+        "mousemove", "--sync", str(int(x2)), str(int(y2)), "sleep", "0.1", "mouseup", "1")
+    return {"dragged": [[int(x1), int(y1)], [int(x2), int(y2)]]}
+
+
+def scroll(x, y, direction, steps="3"):
+    b = {"up": "4", "down": "5"}.get(direction)
+    if not b:
+        raise Fail(f"scroll up or down, not {direction!r}")
+    run("xdotool", "mousemove", "--sync", str(int(x)), str(int(y)), "click", "--repeat", str(int(steps)), b)
+    return {"scrolled": direction, "steps": int(steps)}
+
+
+def keys(*combos):
+    for c in combos:
+        if not re.fullmatch(r"[A-Za-z0-9_+]{1,40}", c):
+            raise Fail(f"odd key {c!r}")
+    run("xdotool", "key", "--", *combos)
+    return {"pressed": list(combos)}
+
+
+def type_text(text):
+    run("xdotool", "type", "--delay", "8", "--", text)
+    return {"typed": len(text)}
+
+
+# ---------- screen ----------
+
+def screenshot(path, maxwidth="1280"):
+    w, h = screen_size()
+    mw = min(int(maxwidth), w)
+    run("ffmpeg", "-loglevel", "error", "-y", "-f", "x11grab", "-video_size", f"{w}x{h}", "-i", ":0",
+        "-frames:v", "1", "-vf", f"scale={mw}:-2", "-q:v", "4", "-f", "image2", "-c:v", "mjpeg", path)
+    return {"file": path, "screen": [w, h], "image": [mw, round(h * mw / w / 2) * 2], "scale": w / mw}
+
+
+# ---------- files ----------
+
+def inside_home(p, must_exist=True):
+    full = os.path.realpath(os.path.expanduser(p if p.startswith(("/", "~")) else os.path.join(HOME, p)))
+    homes = {os.path.realpath(HOME)} | {os.path.realpath(os.path.join(HOME, d))
+                                         for d in os.listdir(HOME) if os.path.islink(os.path.join(HOME, d))}
+    if not any(full == h or full.startswith(h + os.sep) for h in homes):
+        raise Fail(f"{p}: outside your home folder")
+    if must_exist and not os.path.lexists(full):
+        raise Fail(f"{p}: not found")
+    return full
+
+
+def show(p):
+    home = os.path.realpath(HOME)
+    for d in os.listdir(HOME):   # show desk-linked folders by their home name
+        link = os.path.join(HOME, d)
+        if os.path.islink(link) and (p == os.path.realpath(link) or p.startswith(os.path.realpath(link) + os.sep)):
+            return "~/" + d + p[len(os.path.realpath(link)):]
+    return "~" + p[len(home):] if p.startswith(home) else p
+
+
+def ls(path="~", pattern="*"):
+    d = inside_home(path)
+    items = []
+    for name in sorted(os.listdir(d)):
+        if name.startswith(".") or not fnmatch.fnmatch(name.lower(), pattern.lower()):
+            continue
+        full = os.path.join(d, name)
+        items.append({"name": name, "dir": os.path.isdir(full),
+                      "size": os.path.getsize(full) if os.path.isfile(full) else None})
+    return {"path": show(d), "items": items[:300], "more": max(0, len(items) - 300)}
+
+
+def mkdir(path):
+    full = inside_home(path, must_exist=False)
+    os.makedirs(full, exist_ok=True)
+    return {"made": show(full)}
+
+
+def targets(srcs, dest):
+    """Where each source goes; refuses anything that would overwrite."""
+    srcs = [inside_home(s) for s in srcs]
+    d = inside_home(dest, must_exist=False)
+    if os.path.isdir(d):
+        pairs = [(s, os.path.join(d, os.path.basename(s))) for s in srcs]
+    elif len(srcs) == 1:
+        if not os.path.isdir(os.path.dirname(d)):
+            raise Fail(f"{dest}: no such folder")
+        pairs = [(srcs[0], d)]
+    else:
+        raise Fail(f"{dest}: not a folder (make it first)")
+    for s, t in pairs:
+        if os.path.lexists(t):
+            raise Fail(f"{show(t)} already exists: not overwriting")
+        if os.path.realpath(t).startswith(os.path.realpath(s) + os.sep):
+            raise Fail(f"can't put {show(s)} inside itself")
+    return pairs
+
+
+def move(*args):
+    if len(args) < 2:
+        raise Fail("move SRC... DEST")
+    done = []
+    for s, t in targets(args[:-1], args[-1]):
+        shutil.move(s, t)
+        done.append([show(s), show(t)])
+    return {"moved": done}
+
+
+def copy(*args):
+    if len(args) < 2:
+        raise Fail("copy SRC... DEST")
+    done = []
+    for s, t in targets(args[:-1], args[-1]):
+        (shutil.copytree if os.path.isdir(s) else shutil.copy2)(s, t)
+        done.append([show(s), show(t)])
+    return {"copied": done}
+
+
+def trash(*paths):
+    done = []
+    for p in paths:
+        full = inside_home(p)
+        if full in {os.path.realpath(HOME)} | {os.path.realpath(os.path.join(HOME, d)) for d in os.listdir(HOME)}:
+            if os.path.dirname(full) == os.path.realpath(HOME) or os.path.islink(os.path.join(HOME, os.path.basename(full))):
+                raise Fail(f"{p}: won't trash a top-level folder")
+        run("gio", "trash", full)
+        done.append(show(full))
+    return {"trashed": done, "undo": "restore from the Trash"}
+
+
+COMMANDS = {
+    "windows": lambda: {"windows": windows()},
+    "arrange": arrange,
+    "place": lambda spec, x, y, w, h: (place(find_window(spec)["id"], int(x), int(y), int(w), int(h)),
+                                       {"placed": spec})[1],
+    "focus": lambda spec: (run("wmctrl", "-i", "-a", find_window(spec)["id"]), {"focused": spec})[1],
+    "click": click, "drag": drag, "scroll": scroll, "type": type_text, "key": keys,
+    "screen": lambda: dict(zip(("w", "h"), screen_size()), work_area=work_area()),
+    "screenshot": screenshot,
+    "ls": ls, "mkdir": mkdir, "move": move, "copy": copy, "trash": trash,
+}
+
+
+def main():
+    if (os.geteuid() == 0 or not os.environ.get("DISPLAY")) and os.environ.get("NC_DESK_NO_REEXEC") != "1":
+        os.execvp("nc-as-user", ["nc-as-user", "env", "NC_DESK_NO_REEXEC=1", sys.argv[0], *sys.argv[1:]])
+    if len(sys.argv) < 2 or sys.argv[1] not in COMMANDS:
+        print(__doc__)
+        sys.exit(2)
+    try:
+        res = COMMANDS[sys.argv[1]](*sys.argv[2:])
+        print(json.dumps({"ok": True, **res}, ensure_ascii=False))
+    except (Fail, TypeError, ValueError, OSError, subprocess.TimeoutExpired) as e:
+        msg = str(e)
+        if isinstance(e, TypeError):
+            msg = f"wrong arguments for {sys.argv[1]}; see nc-desk --help"
+        print(json.dumps({"ok": False, "error": msg}, ensure_ascii=False))
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

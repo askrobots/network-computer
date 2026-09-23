@@ -164,6 +164,9 @@ if [ -n "$DESK" ]; then
     ln -sfn "/desk/home/$p" "$UHOME/$p"; chown -h "$NC_DESK_USER:$NC_DESK_USER" "$UHOME/$p"
   done
   chown -R "$NC_DESK_USER:$NC_DESK_USER" /desk/home /desk/secrets
+  # the Trash for files on the desk (gio won't create it at the top of a volume)
+  DUID=$(id -u "$NC_DESK_USER")
+  install -d -o "$NC_DESK_USER" -g "$NC_DESK_USER" -m 0700 "/desk/.Trash-$DUID"
   if [ ! -f /desk/secrets/env ]; then
     install -m 0600 -o "$NC_DESK_USER" -g "$NC_DESK_USER" /dev/null /desk/secrets/env
     echo "# API keys for this desk, e.g. ANTHROPIC_API_KEY=... (lives on the desk, 0600)" > /desk/secrets/env

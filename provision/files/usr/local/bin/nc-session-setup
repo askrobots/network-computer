@@ -8,3 +8,12 @@ q -p '/xfwm4/custom/<Alt>space' -r 2>/dev/null
 q -p '/xfwm4/custom/<Shift><Alt>space' -n -t string -s popup_menu_key 2>/dev/null || q -p '/xfwm4/custom/<Shift><Alt>space' -s popup_menu_key
 q -p '/commands/custom/<Alt>space' -n -t string -s nc-launch 2>/dev/null || q -p '/commands/custom/<Alt>space' -s nc-launch
 echo "shortcuts: Alt+Space search and launch; Shift+Alt+Space window menu"
+
+# an Object Server icon on the desktop, once (the user may delete it), marked
+# trusted so Xfce opens it without the "untrusted launcher" question
+D=$(xdg-user-dir DESKTOP 2>/dev/null || echo "$HOME/Desktop"); L="$D/Object Server.desktop"
+if [ ! -e "$L" ] && [ ! -e "$HOME/.config/nc/object-icon-placed" ]; then
+  cp /usr/share/applications/nc-object-home.desktop "$L" && chmod +x "$L" &&
+    gio set -t string "$L" metadata::xfce-exe-checksum "$(sha256sum "$L" | cut -d' ' -f1)" 2>/dev/null
+  mkdir -p "$HOME/.config/nc" && touch "$HOME/.config/nc/object-icon-placed"
+fi

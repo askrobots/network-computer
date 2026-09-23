@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Talk (object server)
+Comment=The object server voice page
+Exec=xdg-open http://localhost:8009/open?next=/talk
+Icon=audio-input-microphone
+Categories=Network;Office;

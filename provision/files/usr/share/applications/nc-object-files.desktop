@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Files (object server)
+Comment=Your files in the object server
+Exec=xdg-open http://localhost:8009/open?next=/files
+Icon=folder-remote
+Categories=Network;Office;

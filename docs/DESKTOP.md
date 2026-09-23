@@ -132,6 +132,43 @@ Next: local speech to text (whisper.cpp) to cut the remaining network trip, a wa
 reading the screen, the clipboard and files as context, and the object server's own
 records and tools.
 
+## The computer controller: voice that does things (2026-09-23)
+
+`nc-desk` is a small open-source command-line controller for the desk, JSON in and out,
+used by voice and usable by scripts or an AI agent over SSH:
+
+- windows: list, arrange (left/right/top/bottom half, max, center, min), place, focus, close;
+- mouse and keys: click, double/right click, drag, scroll, type, key combos;
+- screenshots at a cheap size, with the scale from image to screen pixels;
+- files, only inside the home folder: ls, mkdir, move, copy (never overwriting), and
+  trash (undoable; the desk volume has its own Trash).
+
+Voice now works in **steps**: it can act, then get the results (a file list, a web page's
+text, a screenshot) and continue, up to 8 steps, each shown in the panel. It can arrange
+windows, click what it sees (only after a screenshot in the same request: no blind
+clicks), handle files, read web pages through the object server's reader (text, not a
+screenshot), and search your records.
+
+**Approval, in three levels:** opening, arranging, looking, listing, making folders,
+moving and copying (which never overwrite) just run. Clicking, dragging, typing and key
+presses get a quick second opinion from another model (Haiku), which sees your words and
+exactly what is about to happen and says ok, ask, or no. Trash, and anything the reviewer
+is unsure of, is asked out loud ("Should I move to Trash: ~/Desktop/old-notes.txt? Say yes
+or no."); no answer means it doesn't happen.
+
+**In the object server:** every turn is logged with source `voice`, every desktop action
+as its own row (visible in `/shell`), and costs in `ai_usage`. Its pages (home, Talk,
+Shell, Files) are in the Applications menu and on the desktop, and open signed in through
+a local helper (`localhost:8009/open?next=/talk`; cookies are shared across ports on
+localhost, so the object server needs no change). The object server has no approvals
+queue yet (tasks auto-approve after 48 h, wrong for this), so approvals live in voice.
+
+Tested on the desk: two windows side by side; a folder made and a file moved into it;
+the Applications menu opened by clicking what it saw, then checked; a file trashed after
+"yes"; Hacker News' top story read from the page text in about 4.5 s. Object server tools
+attached to every chat call cost about 4 s per call, so voice calls the reader and search
+itself, only when needed.
+
 ## 5. Your session comes back
 
 Windows, terminal sessions (`tmux` on the desk) and Firefox tabs restored after a rebuild,

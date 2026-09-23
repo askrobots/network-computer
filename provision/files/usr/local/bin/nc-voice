@@ -20,10 +20,17 @@ Standard library only. Configuration from the environment:
   NC_PIPER_VOICE        default /opt/piper/voices/en_US-lessac-medium.onnx
   NC_VOICE_SOURCE       pulse source to listen to, default nc-mic-in
   NC_HOST_SOCKET        default /run/nc-host/send.sock
+  NC_SIGNIN_PORT        default 8009: http://localhost:8009/open?next=/talk signs the
+                        desk's browser in to the object server and goes there
+
+In the object server: every turn is logged with source "voice" (shell_commands,
+ai_usage), every desktop action as its own shell_commands row, and the AI may
+use its read_page and global_search tools.
 """
 import array
 import glob
 import http.client
+import http.server
 import io
 import json
 import math
@@ -36,6 +43,7 @@ import sys
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import wave
 
@@ -51,6 +59,9 @@ TTS = os.environ.get("NC_VOICE_TTS", "piper" if PiperVoice else "openai")
 PIPER_VOICE = os.environ.get("NC_PIPER_VOICE", "/opt/piper/voices/en_US-lessac-medium.onnx")
 SOURCE = os.environ.get("NC_VOICE_SOURCE", "nc-mic-in")
 SOCK = os.environ.get("NC_HOST_SOCKET", "/run/nc-host/send.sock")
+SIGNIN_PORT = int(os.environ.get("NC_SIGNIN_PORT", "8009"))
+SESSION_ID = "voice-" + time.strftime("%Y%m%d-%H%M%S")
+OBJ_FOR_ACTIONS = None   # set in Voice(): read_page and find use the object server directly
 
 RATE = 16000
 FRAME = 320            # 20 ms of 16-bit mono
@@ -60,6 +71,7 @@ END = 35               # quiet frames that end one (700 ms)
 MAX_FRAMES = 30 * 50   # 30 s
 MIN_SPEECH = 20        # 400 ms of speech, or it was a noise
 ONCE_WAIT = 8          # seconds to wait for the one phrase before giving up
+MAX_STEPS = 8          # rounds of think, act, look for one request
 
 
 def log(*a):
@@ -93,20 +105,25 @@ def event(kind, text=""):
 
 # ---------- the object server: speech to text, AI, text to speech ----------
 
+def new_session(label, ttl=12 * 3600):
+    """A session for the desk user, opened with the admin token."""
+    body = json.dumps({"user_id": USER, "ttl_seconds": ttl, "label": label}).encode()
+    req = urllib.request.Request(OBJ + "/identity/sessions", body, method="POST",
+                                 headers={"Authorization": "Token " + ADMIN, "Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=15) as r:
+        res = json.load(r)
+    token = res.get("token") or (res.get("session") or {}).get("token")
+    if not token:
+        raise RuntimeError("object server returned no session token")
+    return token
+
+
 class ObjectServer:
     def __init__(self):
         self.token = None
 
     def _open_session(self):
-        body = json.dumps({"user_id": USER, "ttl_seconds": 12 * 3600, "label": "nc-voice"}).encode()
-        req = urllib.request.Request(OBJ + "/identity/sessions", body, method="POST",
-                                     headers={"Authorization": "Token " + ADMIN,
-                                              "Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=15) as r:
-            res = json.load(r)
-        self.token = res.get("token") or (res.get("session") or {}).get("token")
-        if not self.token:
-            raise RuntimeError("object server returned no session token")
+        self.token = new_session("nc-voice")
 
     def call(self, path, body, ctype, timeout=60, retry=True):
         if not self.token:
@@ -132,8 +149,11 @@ class ObjectServer:
         data, _ = self.call("/api/stt", wav, "audio/wav")
         return json.loads(data).get("text", "").strip()
 
-    def chat(self, message, history, system, attachments=None):
-        req = {"message": message, "model": MODEL, "system": system, "history": history}
+    def chat(self, message, history, system, attachments=None, model=None, tools=None):
+        req = {"message": message, "model": model or MODEL, "system": system, "history": history,
+               "source": "voice", "session_id": SESSION_ID}
+        if tools:
+            req["tools"] = tools
         if attachments:
             req["attachments"] = attachments
         body = json.dumps(req).encode()
@@ -156,6 +176,34 @@ class ObjectServer:
         except (OSError, urllib.error.HTTPError):
             pass
 
+    def get(self, path, timeout=30):
+        if not self.token:
+            self._open_session()
+        req = urllib.request.Request(OBJ + path, headers={"Authorization": "Bearer " + self.token})
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return json.load(r)
+        except urllib.error.HTTPError as e:
+            if e.code == 401:
+                self.token = None
+            raise RuntimeError(f"{path.split('?')[0]}: HTTP {e.code}") from None
+
+    def read_page(self, url):
+        data, _ = self.call("/api/read", json.dumps({"url": url}).encode(), "application/json", timeout=45)
+        return json.loads(data)
+
+    def log_action(self, request, done):
+        """Record a desktop action in the object server, next to the AI turns."""
+        def post():
+            try:
+                row = {"input": request[:500], "output": done[:2000], "kind": "command",
+                       "source": "voice", "session_id": SESSION_ID, "owner_id": USER}
+                self.call("/collections/shell_commands/records", json.dumps(row).encode(),
+                          "application/json", timeout=10)
+            except Exception as e:
+                log(f"couldn't log the action: {e}")
+        threading.Thread(target=post, daemon=True).start()
+
     def tts(self, text):
         body = json.dumps({"text": text[:800], "engine": TTS}).encode()
         data, _ = self.call("/api/tts", body, "application/json")
@@ -169,14 +217,30 @@ def desk(*cmd, timeout=10):
     return subprocess.run(["nc-as-user", *cmd], capture_output=True, text=True, timeout=timeout)
 
 
+def nc_desk(*args, timeout=30):
+    """The computer controller (nc-desk): JSON in, JSON out."""
+    r = subprocess.run(["nc-desk", *map(str, args)], capture_output=True, text=True, timeout=timeout)
+    try:
+        res = json.loads(r.stdout)
+    except ValueError:
+        raise RuntimeError((r.stderr or r.stdout).strip() or "nc-desk failed")
+    if not res.get("ok"):
+        raise RuntimeError(res.get("error", "nc-desk failed"))
+    return res
+
+
+SHOT_WIDTH = 1280
+
+
 def screenshot():
-    """The desk's screen as a JPEG, at most 1280 wide: enough to read, cheap to send."""
-    r = subprocess.run(["nc-as-user", "ffmpeg", "-loglevel", "error", "-f", "x11grab", "-i", ":0",
-                        "-frames:v", "1", "-vf", "scale='min(1280,iw)':-2", "-q:v", "4",
-                        "-f", "image2", "-c:v", "mjpeg", "pipe:1"], capture_output=True, timeout=15)
-    if r.returncode != 0 or not r.stdout:
-        raise RuntimeError("could not take a screenshot")
-    return r.stdout
+    """The desk's screen as a JPEG, at most 1280 wide: enough to read, cheap to
+    send. Returns the bytes and the factor from image pixels to screen pixels."""
+    path = f"/tmp/nc-voice-shot-{os.getpid()}.jpg"
+    res = nc_desk("screenshot", path, SHOT_WIDTH)
+    with open(path, "rb") as f:
+        data = f.read()
+    os.unlink(path)
+    return data, res["scale"], res["image"]
 
 
 def open_windows():
@@ -212,12 +276,17 @@ def installed_apps():
 APPS = installed_apps()
 
 
+GENERIC = {"text editor": "mousepad", "editor": "mousepad", "notepad": "mousepad", "browser": "firefox",
+           "web browser": "firefox", "terminal": "xfce4-terminal", "files": "thunar", "file manager": "thunar",
+           "video player": "vlc", "music": "vlc", "sound recorder": "audacity", "volume": "pavucontrol"}
+
+
 def find_app(name):
     if name in APPS:
         return name
-    n = name.lower()
+    n = GENERIC.get(name.lower().strip(), name.lower().strip())
     match = [k for k, v in APPS.items() if n in (k + " " + v).lower()]
-    return match[0] if match else None
+    return min(match, key=len) if match else None
 
 
 def raise_app(app):
@@ -232,7 +301,7 @@ def launch(app):
     subprocess.Popen(["nc-as-user", "gtk-launch", app], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
-def act(a):
+def act(a, scale=None):
     """Do one action from the AI; return what was done, for the transcript.
     Opening and switching check the desktop as it is now, whatever the AI
     believes: the user opens and closes things too."""
@@ -278,66 +347,155 @@ def act(a):
         q = a.get("query", "")
         subprocess.Popen(["nc-launch", "search", q], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return f"searched for {q}"
+    # the object server's page reader and search: text back, no screenshot
+    if kind == "read_page":
+        r = OBJ_FOR_ACTIONS.read_page(a.get("url", ""))
+        links = " ".join(f"[{l.get('n')}] {l.get('label', '')[:40]}" for l in (r.get("links") or [])[:40])
+        return (f"read {r.get('title') or a.get('url')}: {(r.get('text') or '')[:6000]}"
+                + (f" LINKS: {links}" if links else ""))
+    if kind == "find":
+        q = urllib.parse.quote(a.get("query", ""))
+        r = OBJ_FOR_ACTIONS.get(f"/api/search?q={q}&limit=10")
+        hits = r.get("results") or r.get("records") or r.get("hits") or []
+        return f"found for {a.get('query')!r}: " + (json.dumps(hits)[:3000] if hits else "nothing")
+    if kind == "arrange":
+        r = nc_desk("arrange", a.get("window", ""), a.get("how", ""))
+        return f"{a.get('how')}: {r['window']}"
+    # mouse: coordinates are in the last screenshot's pixels, so no screenshot, no click
+    if kind in ("click", "drag") and scale is None:
+        raise RuntimeError("look first: clicking needs a screenshot from this request")
+    k = scale or 1
+    if kind == "click":
+        nc_desk("click", round(a["x"] * k), round(a["y"] * k), a.get("button", "left"),
+                "double" if a.get("double") else "")
+        return f"clicked {a.get('what') or 'at %s,%s' % (a['x'], a['y'])}"
+    if kind == "drag":
+        nc_desk("drag", round(a["x1"] * k), round(a["y1"] * k), round(a["x2"] * k), round(a["y2"] * k))
+        return f"dragged {a.get('what') or ''}".strip()
+    if kind == "scroll":
+        nc_desk("scroll", round(a.get("x", 640) * k), round(a.get("y", 400) * k), a.get("direction", "down"),
+                a.get("steps", 3))
+        return f"scrolled {a.get('direction', 'down')}"
+    # files: inside the home folder; nc-desk never overwrites
+    if kind == "ls":
+        r = nc_desk("ls", a.get("path", "~"), a.get("glob", "*"))
+        names = [i["name"] + ("/" if i["dir"] else "") for i in r["items"]]
+        return f"{r['path']}: " + (", ".join(names) if names else "empty") + (f" (+{r['more']} more)" if r["more"] else "")
+    if kind == "mkdir":
+        return f"made {nc_desk('mkdir', a['path'])['made']}"
+    if kind in ("move", "copy"):
+        src = a.get("from") or []
+        src = [src] if isinstance(src, str) else src
+        r = nc_desk(kind, *src, a["to"])
+        pairs = r["moved" if kind == "move" else "copied"]
+        return f"{'moved' if kind == 'move' else 'copied'} " + ", ".join(f"{x} → {y}" for x, y in pairs)
+    if kind == "trash":
+        paths = a.get("paths") or []
+        paths = [paths] if isinstance(paths, str) else paths
+        return "moved to Trash: " + ", ".join(nc_desk("trash", *paths)["trashed"])
     raise RuntimeError(f"unknown action {kind!r}")
 
 
 SYSTEM = """You are the voice of a Linux desktop (Xfce) that its user reaches through a
-remote-desktop client. You hear them through their microphone and they hear your
-"say" text spoken. Keep "say" short (one or two sentences), plain spoken words, no
-markdown, no lists. Reply with ONLY a JSON object:
-{"say": "...", "actions": [ ... ]}
+remote-desktop client, and you can operate it for them. You hear them through their
+microphone and they hear your "say" text spoken. Keep "say" short (one or two
+sentences), plain spoken words, no markdown, no lists. Reply with ONLY a JSON object:
+{"say": "...", "actions": [ ... ], "more": false}
 Actions, done in order:
-  {"do": "open_app", "app": "<app id from the list>"}
-  {"do": "switch", "window": "<part of an open window's title>"}
-  {"do": "close", "window": "<part of an open window's title>"}
+  {"do": "open_app", "app": "<app name: firefox, text editor, terminal, files, vlc...>"}
+                                                        (switches to it if already open)
+  {"do": "switch", "window": "<part of a window title>"}
+  {"do": "close", "window": "<part of a window title>"}
+  {"do": "arrange", "window": "<part of a title>", "how": "left|right|top|bottom|max|restore|center|min"}
   {"do": "open", "target": "<file path like ~/Desktop/x.pdf, or a URL>"}
+  {"do": "search", "query": "<text>"}   (opens the desk's search bar with it)
   {"do": "type", "text": "<text to type into the focused window>"}
   {"do": "keys", "keys": "<xdotool key names, e.g. ctrl+s or Return>"}
-  {"do": "search", "query": "<text>"}   (opens the desk's search bar with this query)
-  {"do": "look"}   when you must see what is on the screen to answer or act: reading or
-                   describing anything inside a window ("what does my note say", "what's
-                   this error", "what am I looking at"). The window list gives only titles,
-                   never contents. Put look last, after e.g. a switch to the right window,
-                   with "say" empty; you then get a screenshot and answer again. Don't look
-                   for anything the window list or the question already tells you.
-Use no actions when they are just talking or asking something. When you take actions,
-keep "say" to a few words ("Opening Firefox.") or leave it empty.
-Each message ends with the desktop as it is right now (open windows). Trust that over
-anything said earlier: the user opens and closes windows themselves. When asked to open
-something, use open_app even if you opened it before (it switches to it if it is open). Web searches: open a
-URL such as https://duckduckgo.com/?q=... . Their files are in ~/Desktop and
-~/Documents. Speech recognition makes mistakes: guess the likely meaning."""
+  {"do": "click", "x": 0, "y": 0, "what": "<what you are clicking>", "button": "left", "double": false}
+  {"do": "drag", "x1": 0, "y1": 0, "x2": 0, "y2": 0, "what": "<what you are dragging>"}
+  {"do": "scroll", "x": 0, "y": 0, "direction": "up|down", "steps": 3}
+  {"do": "ls", "path": "~/Desktop", "glob": "*.pdf"}      (you get the list next step)
+  {"do": "mkdir", "path": "~/Documents/Receipts"}
+  {"do": "move", "from": ["~/Desktop/a.pdf"], "to": "~/Documents"}   (never overwrites)
+  {"do": "copy", "from": ["~/Desktop/a.pdf"], "to": "~/Documents"}
+  {"do": "trash", "paths": ["~/Desktop/old.txt"]}   (the user is asked first)
+  {"do": "read_page", "url": "https://..."}   a web page's text and numbered links
+                   (cheaper than a screenshot for reading or summarizing a page)
+  {"do": "find", "query": "..."}   search the user's own records (notes, tasks...)
+  {"do": "look"}   to get a screenshot of the screen as it is (after your other actions)
+Seeing: the window list gives only titles, never contents. To read or describe what is in
+a window, or to click something, you need a screenshot: add look. Mouse coordinates are
+pixels in the most recent screenshot; never guess them without one.
+Steps: set "more": true when you need to see results before finishing: after ls,
+read_page, find or look, or to check that a click worked. You then get the results (and the screenshot if
+you looked) and continue. Finish with "more": false. At most 8 steps; keep going only
+while it helps. Say a few words per step at most ("Opening the settings."), or nothing.
+Use no actions when they are just talking or asking something.
+The object server's own pages open signed in at http://localhost:8009/open?next=/ (home),
+and next=/talk, /shell, /files.
+Each message ends with the desktop as it is right now. Trust it over anything said
+earlier: the user opens and closes things themselves. Files are in ~/Desktop and
+~/Documents. Web searches: open https://duckduckgo.com/?q=... . Speech recognition makes
+mistakes: guess the likely meaning."""
 
-
-# After a look: the same instructions without the look action, and saying the
-# screenshot is here (with look still offered, it kept asking to look again).
-SYSTEM_LOOKED = re.sub(r'  \{"do": "look"\}.*?screenshot and answer again\. Don\'t look\n.*?already tells you\.\n', '',
-                       SYSTEM, flags=re.S) + """
-This message comes with a screenshot of the user's screen as it is right now. Answer
-from what you see in it; you can read text in it."""
+WITH_SCREENSHOT = """[A screenshot of the screen right now is attached ({w}x{h} pixels; mouse
+coordinates are in these pixels). Answer or act from it. Look again only after actions
+that change the screen.]"""
 
 
 def context():
-    wins = open_windows()
-    apps = ", ".join(f"{k} ({v})" for k, v in APPS.items())
-    return (f"[Desktop right now: open windows {json.dumps(wins)}; "
-            f"time {time.strftime('%A %Y-%m-%d %H:%M')}]\n[Installed apps, id (name): {apps}]")
+    """What changes between turns, kept small: it rides on every message."""
+    return (f"[Desktop right now: open windows {json.dumps(open_windows())}; "
+            f"time {time.strftime('%A %Y-%m-%d %H:%M')}]")
 
 
 def parse_reply(reply):
+    """-> (say, actions, more)"""
     m = re.search(r"\{.*\}", reply, re.S)
     if m:
         try:
             d = json.loads(m.group(0))
             if isinstance(d, dict):
                 acts = d.get("actions") or []
-                return str(d.get("say", "")), [x for x in acts if isinstance(x, dict)]
+                return str(d.get("say", "")), [x for x in acts if isinstance(x, dict)], bool(d.get("more"))
         except ValueError:
             pass
-    return reply.strip(), []
+    return reply.strip(), [], False
 
 
-# ---------- listening ----------
+# ---------- approval ----------
+# Three levels. Safe actions run. Actions that can trigger anything inside an
+# app (click, drag, type, keys) get a quick second look from another model,
+# which sees the user's words and exactly what is about to happen. Trash, and
+# anything the reviewer is unsure of, is asked of the user out loud.
+SAFE = {"open_app", "switch", "close", "arrange", "open", "search", "look", "ls", "mkdir",
+        "move", "copy", "scroll", "read_page", "find"}
+REVIEW = {"click", "drag", "type", "keys"}
+ASK = {"trash"}
+REVIEW_MODEL = os.environ.get("NC_VOICE_REVIEW_MODEL", "anthropic:claude-haiku-4-5")
+REVIEWER = """You check one action a voice assistant is about to take on a user's Linux
+desktop, before it happens. Reply with ONLY JSON: {"verdict": "ok|ask|no", "reason": "..."}.
+ok: plainly what the user asked for, or a harmless step toward it.
+ask: it could lose work or data, send or post something, buy or pay, change settings or
+accounts, or delete anything, or it is not clearly what the user asked: the user is asked.
+no: clearly against what the user asked, or harmful.
+Keep "reason" to a few words."""
+
+
+def describe(a):
+    kind = a.get("do")
+    if kind in ("click", "drag"):
+        return f"{kind} {a.get('what') or ''}".strip()
+    if kind == "type":
+        return f"type {a.get('text', '')[:80]!r}"
+    if kind == "keys":
+        return f"press {a.get('keys')}"
+    if kind == "trash":
+        return "move to Trash: " + ", ".join(a.get("paths") or [])
+    return json.dumps(a)
+
+
+# ---------- listening ----------# ---------- listening ----------
 
 def rms(frame):
     s = array.array("h", frame)
@@ -368,6 +526,9 @@ class Voice:
         self.rec = None
         self.utterances = queue.Queue()
         self.history = []
+        self.pending = None   # actions waiting for the user's yes or no
+        global OBJ_FOR_ACTIONS
+        OBJ_FOR_ACTIONS = self.obj
         threading.Thread(target=self.worker, daemon=True).start()
 
     def start(self, once=False):
@@ -393,6 +554,9 @@ class Voice:
         if not self.on:
             return
         self.on = False
+        if not answering and self.pending:   # no answer (or voice turned off): it doesn't happen
+            self.pending = None
+            event("did", "cancelled: no answer")
         if self.rec:
             self.rec.terminate()
         if not answering:   # else the answer is on its way; "off" follows it
@@ -451,6 +615,24 @@ class Voice:
             if self.utterances.empty():
                 event("state", "listening" if self.on else "off")
 
+    def approve(self, request, a, window):
+        """-> ("run" | "ask" | "no", reason)"""
+        kind = a.get("do")
+        if kind in SAFE:
+            return "run", ""
+        if kind in ASK:
+            return "ask", ""
+        if kind in REVIEW:
+            try:
+                r = self.obj.chat(f"User asked: {request!r}\nFocused window: {window!r}\n"
+                                  f"About to: {describe(a)}", [], REVIEWER, model=REVIEW_MODEL)
+                d = json.loads(re.search(r"\{.*\}", r, re.S).group(0))
+                v = d.get("verdict")
+                return ({"ok": "run", "ask": "ask", "no": "no"}.get(v, "ask"), d.get("reason", ""))
+            except Exception as e:   # no review, no action without the user
+                return "ask", f"couldn't check it ({e})"
+        return "no", f"unknown action {kind}"
+
     def handle(self, wav):
         t = [("start", time.monotonic())]
         mark = lambda name: t.append((name, time.monotonic()))
@@ -460,46 +642,103 @@ class Voice:
         if not text:
             return
         event("heard", text)
-        reply = self.obj.chat(text + "\n\n" + context(), self.history[-12:], SYSTEM)
-        mark("ai")
-        say, actions = parse_reply(reply)
-        if any(a.get("do") == "look" for a in actions):   # it needs to see: one screenshot, this turn only
-            for a in actions[:next(i for i, a in enumerate(actions) if a.get("do") == "look")]:
-                try:   # e.g. switch to the window first, so the screenshot shows it
-                    event("did", act(a))
-                except Exception as e:
-                    event("error", str(e))
-            time.sleep(0.4)
-            event("did", "👁 looked at the screen")
-            shot = screenshot()
-            fid = self.obj.upload("screen.jpg", shot, "image/jpeg")
-            try:
-                reply = self.obj.chat("[Screenshot attached.] " + text + "\n\n" + context(),
-                                      self.history[-12:], SYSTEM_LOOKED, attachments=[fid])
-            finally:
-                self.obj.delete_file(fid)
-            mark("look")
-            log("after looking: " + reply[:300].replace("\n", " "))
-            say, actions = parse_reply(reply)
-            actions = [a for a in actions if a.get("do") != "look"]
-            if not say and not actions:
-                say = "I looked, but I couldn't tell."
-
-        def do_actions():
-            for a in actions:
-                try:
-                    event("did", act(a))
-                except Exception as e:
-                    event("error", str(e))
-        doer = threading.Thread(target=do_actions)
-        doer.start()   # act and speak at the same time
-        self.history += [{"role": "user", "content": text},
-                         {"role": "assistant", "content": json.dumps({"say": say, "actions": actions})}]
-        if say:   # the text appears as the voice starts, not before
-            self.speak(say, mark, on_start=lambda: event("said", say))
-        doer.join()
+        if self.pending:
+            self.answer_pending(text)
+        else:
+            self.task(text, mark)
         steps = " ".join(f"{n} {b - a:.2f}" for (_, a), (n, b) in zip(t, t[1:]))
-        log(f"timing: {steps} total-to-voice {dict(t).get('voice', t[-1][1]) - t[0][1]:.2f}s")
+        log(f"timing: {steps}")
+
+    def task(self, text, mark):
+        """One request, in up to MAX_STEPS rounds of think, act, (look)."""
+        turns = list(self.history[-12:])
+        message, attach, scale, final = text + "\n\n" + context(), None, None, ""
+        for step in range(MAX_STEPS):
+            try:
+                reply = self.obj.chat(message, turns, SYSTEM, attachments=attach)
+            finally:
+                if attach:
+                    self.obj.delete_file(attach[0])
+            mark(f"ai{step + 1}")
+            say, actions, more = parse_reply(reply)
+            turns += [{"role": "user", "content": message.split("\n\n[Desktop right now")[0]},
+                      {"role": "assistant", "content": reply}]
+            final = say or final
+            if say:
+                self.speak(say, mark, on_start=lambda say=say: event("said", say))
+            results, look = [], False
+            window = (open_windows() or [""])[0]
+            for i, a in enumerate(actions):
+                if a.get("do") == "look":
+                    look = True
+                    continue
+                verdict, why = self.approve(text, a, window)
+                if verdict == "ask":
+                    self.ask(text, actions[i:], why, scale)
+                    return
+                if verdict == "no":
+                    event("error", f"didn't {describe(a)}: {why}")
+                    results.append(f"{describe(a)}: refused by the safety check ({why})")
+                    continue
+                try:
+                    done = act(a, scale)
+                    event("did", done)
+                    self.obj.log_action(text, done)
+                    results.append(done)
+                except Exception as e:
+                    event("error", str(e))
+                    results.append(f"{describe(a)}: failed ({e})")
+            if not (more or look):
+                break
+            if step == MAX_STEPS - 1:
+                event("error", f"stopped after {MAX_STEPS} steps")
+                break
+            time.sleep(0.5)   # let the screen settle
+            message = ("[Results: " + ("; ".join(results) or "none") + "]")
+            attach = None
+            if look:
+                event("did", "👁 looked at the screen")
+                try:
+                    shot, scale, (iw, ih) = screenshot()
+                except Exception as e:
+                    event("error", f"couldn't see the screen: {e}")
+                    break
+                attach = [self.obj.upload("screen.jpg", shot, "image/jpeg")]
+                message += "\n" + WITH_SCREENSHOT.format(w=iw, h=ih)
+            message += "\n\n" + context()
+        self.history += [{"role": "user", "content": text},
+                         {"role": "assistant", "content": json.dumps({"say": final})}]
+
+    def ask(self, request, actions, why, scale):
+        """Hold the rest of the actions until the user says yes or no."""
+        what = describe(actions[0])
+        q = f"Should I {what}?" + (f" ({why})" if why else "") + " Say yes or no."
+        self.pending = {"request": request, "actions": actions, "scale": scale}
+        event("did", f"❓ waiting for your OK: {what}")
+        self.speak(q, on_start=lambda: event("said", q))
+        self.start(once=True)   # listen for the answer, even in one-phrase mode
+
+    def answer_pending(self, text):
+        p, self.pending = self.pending, None
+        if re.search(r"\b(yes|yeah|yep|sure|ok|okay|do it|go ahead|please do|confirm)\b", text, re.I) and \
+                not re.search(r"\b(no|don't|do not|stop|cancel|wait)\b", text, re.I):
+            for a in p["actions"]:   # approved as a whole: the user heard the first; the rest were
+                if a.get("do") == "look":    # part of the same plan and still pass their own checks
+                    continue
+                if a is not p["actions"][0]:
+                    verdict, why = self.approve(p["request"], a, (open_windows() or [""])[0])
+                    if verdict != "run":
+                        event("error", f"stopped before {describe(a)}: {why or 'needs its own OK'}")
+                        break
+                try:
+                    done = act(a, p["scale"])
+                    event("did", done)
+                    self.obj.log_action(p["request"], done + " (you said yes)")
+                except Exception as e:
+                    event("error", str(e))
+            self.speak("Done.", on_start=lambda: event("said", "Done."))
+        else:
+            self.speak("Okay, I won't.", on_start=lambda: event("said", "Okay, I won't."))
 
     def speak(self, text, mark=lambda name: None, on_start=lambda: None):
         self.speaking.set()
@@ -549,9 +788,46 @@ def chime():
     player(rate, "nc-chime").communicate(out.tobytes())
 
 
+class SignIn(http.server.BaseHTTPRequestHandler):
+    """http://localhost:8009/open?next=/talk: signs this browser in to the desk's
+    object server as the desk user and goes there. The object server has no
+    password-free browser login; cookies are shared across ports on localhost,
+    so a cookie set here is sent to localhost:8001. Local only."""
+    def do_GET(self):
+        u = urllib.parse.urlsplit(self.path)
+        host = (self.headers.get("Host") or "").split(":")[0]
+        nxt = urllib.parse.parse_qs(u.query).get("next", ["/"])[0]
+        if u.path != "/open" or host not in ("localhost", "127.0.0.1") or \
+                not nxt.startswith("/") or nxt.startswith("//") or "\\" in nxt:
+            self.send_error(404)
+            return
+        try:
+            token = new_session("desk browser")
+        except Exception as e:
+            self.send_error(502, f"object server: {e}")
+            return
+        self.send_response(302)
+        self.send_header("Set-Cookie", f"dbbasic_session={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=43200")
+        self.send_header("Location", f"http://{host}:8001{nxt}")
+        self.end_headers()
+
+    def log_message(self, *a):
+        pass
+
+
+def serve_signin():
+    try:
+        srv = http.server.ThreadingHTTPServer(("127.0.0.1", SIGNIN_PORT), SignIn)
+    except OSError as e:
+        log(f"sign-in helper: {e}")
+        return
+    srv.serve_forever()
+
+
 def main():
     if not ADMIN:
         sys.exit("nc-voice: DBBASIC_ADMIN_TOKEN is not set")
+    threading.Thread(target=serve_signin, daemon=True).start()
     v = Voice()
     while True:   # follow nc-host's command stream; reconnect when it restarts
         try:
