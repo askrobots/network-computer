@@ -7,14 +7,52 @@ audio, and sends the phone's keyboard, mouse and touch back. Plug the phone into
 AirPlay it to an Apple TV and it is a desk. Everything is open source, runs as single
 static binaries, and works when both ends are behind NAT.
 
-Status: **Phase 0 spike.** The Go side streams a desktop at 1080p60 over WebRTC to a
-browser or a headless probe, through NAT via a self-hosted rendezvous with STUN and TURN
-relay. The native iOS app does not exist yet. See [docs/PLAN.md](docs/PLAN.md) for the
-design and [docs/SPIKE.md](docs/SPIKE.md) for measurements.
+Status: **working on a test desk, not yet 1.0.** A cloud Linux desktop is used
+from a Mac browser and an iPhone: sound both ways, responsive input, clipboard
+and files. See [docs/PLAN.md](docs/PLAN.md) for the design,
+[docs/DESKTOP.md](docs/DESKTOP.md) for what comes next on the desktop, and
+[docs/SPIKE.md](docs/SPIKE.md) for measurements.
 
 ![A Linux desktop streamed to a browser over WebRTC](docs/media/desktop.png)
 
 *A cloud Linux desktop streamed to a Mac browser through NAT, browsing this very repo. 1280×720, direct path, ~45 ms, with audio.*
+
+## What works
+
+- **Picture:** H.264 over WebRTC, direct through NAT when hole punching works and via
+  the built-in TURN relay when it does not. The desktop resizes to your window (or a
+  preset), with a UI scale from 100 to 200%.
+- **Sound both ways:** the desktop's audio plays on your device, and your microphone (the
+  browser's or the phone's) is a microphone on the desktop, for calls, recording and
+  voice apps. Pick the mic in the page and watch its level.
+- **Keyboard and mouse that feel local:** any layout (QWERTY, Dvorak, Colemak... are
+  translated in the page, so the desk stays US), UK/German/French/Spanish, and on a Mac
+  ⌘ acts as Ctrl on the desk, so ⌘C, ⌘V and ⌘Z do what your fingers expect. Touch on
+  phones: tap to click, drag to move.
+- **Clipboard both ways (text):** ⌘/Ctrl+V pastes your device's clipboard on the desk;
+  copying on the desk comes back to your device. The 📋↑ and 📋↓ buttons move it without
+  a keystroke, so the desk's right-click → Paste works too.
+- **Files both ways:** drop files on the window and they land on the desk's Desktop. On
+  the desk, right-click a file → **Send to my device** (or `nc-send FILE`) and a 📥 button
+  appears in the page to save it.
+- **Secure by default with a domain:** a real Let's Encrypt certificate, a password
+  exchanged for a short-lived token, a host PIN typed once and then remembered through
+  pairing, and relay credentials minted per session.
+- **Hot desking:** the computer is disposable, your *desk* is not. A small volume keeps
+  your settings, documents, keys and pairing; destroy the computer to stop paying, bring
+  up another (any size) later, and sit down where you left off. See
+  [docs/DESKS.md](docs/DESKS.md).
+- **One-command desk on DigitalOcean:** `infra/droplet.sh up` builds a provisioned
+  Ubuntu desktop (Xfce, Firefox, VLC, Audacity, the tools above) with its DNS name,
+  checked by 51 automated checks; `infra/droplet.sh down` destroys it and keeps the desk.
+
+### Clients
+
+| Client | Where | Status |
+|---|---|---|
+| Browser | Built into `nc-rendezvous`: any modern browser, including Safari on iPhone and iPad | Everything above |
+| [Flutter app](https://github.com/askrobots/network-computer-flutter) | iPhone, iPad, Android, macOS, Windows, Linux | Picture, sound, mic, touch and keyboard, pairing; clipboard, files and the screen menu not yet |
+| `nc-probe` | Command line | Test client: path, frame rate, audio timing, clipboard and file transfer |
 
 ## How it works
 
@@ -40,8 +78,8 @@ Three programs, all in Go:
 | Binary | What it does |
 |---|---|
 | `nc-rendezvous` | Signaling over WebSocket, STUN and TURN on one UDP port, serves the browser client. Runs on any box with a public IP. |
-| `nc-host` | Runs on the desktop you want to reach. Captures the screen with ffmpeg, encodes H.264 in hardware, streams over WebRTC, injects input. |
-| `nc-probe` | Headless test client. Tells you whether a path is direct or relayed and what frame rate arrives. |
+| `nc-host` | Runs on the desktop you want to reach. Captures the screen and sound with ffmpeg, encodes H.264, streams over WebRTC, injects input, plays your microphone, and syncs clipboard and files. |
+| `nc-probe` | Headless test client. Tells you whether a path is direct or relayed, what frame rate and audio timing arrive, and exercises the mic, screen size, clipboard and file transfer. |
 
 ## Requirements
 
@@ -153,17 +191,25 @@ goes stale on its own. See [docs/SECURITY.md](docs/SECURITY.md).
 -ffmpeg-extra       extra ffmpeg args, e.g. VA-API: -ffmpeg-extra "-vaapi_device /dev/dri/renderD128 -vf format=nv12,hwupload"
 -ffmpeg-args        replace the whole ffmpeg command; must end with "-f h264 pipe:1"
 -audio-device       stream audio from this device (mac: avfoundation index, needs a loopback such as BlackHole; linux: a pulse source)
+-mic-device         play the client's microphone here (linux: a pulse sink such as nc-mic; mac: an output such as BlackHole)
+-files-dir          save files dropped on the client here, e.g. ~/Desktop ('' = refuse them)
+-send-socket        unix socket for nc-send ("Send to my device") ('' = off)
+-state-dir          where the pairing secret lives (on a desk: the desk volume)
 -display 1          capture a different screen
 -dry-run            log input instead of injecting it
 ```
 
-## Known limitations of the spike
+## Known limitations
 
 - One ffmpeg per session; a second client on a macOS host will fail. Shared capture is next.
 - No keyframe on demand; packet loss can show artifacts for up to 2 seconds.
-- Windows input injection is a stub. macOS (CGEvent) and Linux (uinput) work.
-- Audio is opt-in and system audio on macOS needs a loopback device.
-- No native iOS app yet. Safari on an iPhone can open the browser client.
+- Linux hosts are the tested path. macOS hosts work (CGEvent input, pbcopy clipboard);
+  Windows input (SendInput) is written but untested, and Windows hosts have no clipboard
+  or file sync yet.
+- Clipboard is text only. Folders must be zipped before sending.
+- In Safari, text copied on the desk from a menu reaches your Mac at your next click or
+  key press in the page (the browser only lets pages write the clipboard then).
+- System audio on a macOS host needs a loopback device.
 
 ## Running it as an agent
 
@@ -175,11 +221,15 @@ reading the screen back. See [docs/AGENT.md](docs/AGENT.md).
 
 ```
 cmd/nc-rendezvous/   signaling, STUN/TURN, embedded web client
-cmd/nc-host/         capture, encode, WebRTC, input
+cmd/nc-host/         capture, encode, WebRTC, input, mic, clipboard, files, pairing
 cmd/nc-probe/        headless test client
 internal/proto/      signaling and input message types
 internal/input/      per-OS input injection
-docs/                plan, spike results
+internal/oggopus/    Opus packet reader for audio pacing
+internal/tlspin/     certificate pinning for self-signed rendezvous
+provision/           turns a fresh Ubuntu box into a desk (apply.sh, verify.sh)
+infra/               create, rebuild and destroy desks on DigitalOcean and others
+docs/                plan, desks, desktop, security, spike results
 ```
 
 ## License
