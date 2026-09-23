@@ -442,9 +442,8 @@ class Voice:
         try:
             if self.piper:   # stream: the first sentence plays while the rest is made
                 rate = self.piper.config.sample_rate
-                p = subprocess.Popen(["ffmpeg", "-loglevel", "error", "-f", "s16le", "-ar", str(rate), "-ac", "1",
-                                      "-i", "pipe:0", "-f", "pulse", "nc-voice"], stdin=subprocess.PIPE)
-                started, samples = None, 0
+                p = player(rate)
+                started = None
                 for chunk in self.piper.synthesize(text):
                     if started is None:
                         started = time.monotonic()
@@ -452,21 +451,27 @@ class Voice:
                         on_start()
                     p.stdin.write(chunk.audio_int16_bytes)
                     p.stdin.flush()
-                    samples += len(chunk.audio_int16_bytes) // 2
                 p.stdin.close()
-                p.wait(timeout=120)
-                if started is not None:   # ffmpeg exits once pulse has the audio, not once it's heard
-                    time.sleep(max(0.0, samples / rate - (time.monotonic() - started)))
+                p.wait(timeout=120)   # pacat exits once it has all been played
             else:
                 audio = self.obj.tts(text)
                 mark("voice")
                 on_start()
-                subprocess.run(["ffmpeg", "-loglevel", "error", "-i", "pipe:0", "-f", "pulse", "nc-voice"],
-                               input=audio, timeout=120)
+                pcm = subprocess.run(["ffmpeg", "-loglevel", "error", "-i", "pipe:0", "-f", "s16le", "-ac", "1",
+                                      "-ar", "24000", "-"], input=audio, capture_output=True, timeout=60).stdout
+                player(24000).communicate(pcm, timeout=120)
             mark("spoken")
         finally:
             time.sleep(0.3)   # let the tail of our own voice pass the mic
             self.speaking.clear()
+
+
+def player(rate, name="nc-voice"):
+    """Plays raw 16-bit mono on the desk's output. pacat, not ffmpeg: ffmpeg
+    exits as soon as pulse has the audio and pulse drops what hasn't played
+    yet (measured: 2 s of a 4 s tone), which cut the end off every reply."""
+    return subprocess.Popen(["pacat", "--raw", f"--rate={rate}", "--channels=1", "--format=s16le",
+                             f"--client-name={name}", f"--stream-name={name}"], stdin=subprocess.PIPE)
 
 
 def chime():
@@ -477,9 +482,7 @@ def chime():
         for i in range(n):
             env = min(1, i / 200, (n - i) / 400)
             out.append(int(5000 * env * math.sin(2 * math.pi * freq * i / rate)))
-    subprocess.Popen(["ffmpeg", "-loglevel", "error", "-f", "s16le", "-ar", str(rate), "-ac", "1",
-                      "-i", "pipe:0", "-f", "pulse", "nc-chime"],
-                     stdin=subprocess.PIPE).communicate(out.tobytes())
+    player(rate, "nc-chime").communicate(out.tobytes())
 
 
 def main():
