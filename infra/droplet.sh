@@ -48,7 +48,7 @@ case "$1" in
   creds)  ssh root@"$(ip)" '. /etc/nc/env; if [ -n "$NC_DOMAIN" ]; then echo "address:  https://$NC_DOMAIN"; else echo "address:  http://$NC_PUBLIC_IP:8765"; fi
             echo "user:     nc"; echo "password: $NC_PASSWORD"; echo "host:     $NC_HOST_NAME"; echo "PIN:      $NC_PIN"' ;;
   logs)   ssh root@"$(ip)" journalctl -f -u nc-host -u nc-rendezvous ;;
-  update) ssh root@"$(ip)" 'cd /opt/network-computer && git pull -q && export PATH=$PATH:/usr/local/go/bin && go build -o /usr/local/bin/ ./cmd/... && systemctl restart nc-rendezvous nc-host && echo updated' ;;
+  update) ssh root@"$(ip)" 'cd /opt/network-computer && git pull -q && export PATH=$PATH:/usr/local/go/bin && go build -buildvcs=false -o /usr/local/bin/ ./cmd/... && systemctl restart nc-rendezvous nc-host && echo updated' ;;
   provision) IP=$(ip); ssh root@"$IP" 'mkdir -p /root/provision'; scp -q -r "$ROOT/provision/." root@"$IP":/root/provision/
              ssh root@"$IP" "NC_PUBLIC_IP=$IP NC_HOST_NAME=$NC_HOST_NAME NC_DOMAIN=$NC_DOMAIN NC_DESK_USER=$NC_DESK_USER NC_KEYBOARD=$NC_KEYBOARD sh /root/provision/apply.sh" ;;
   dns)    sh ./dns-point.sh "${2:?usage: droplet.sh dns <name.domain>}" "$(ip)" ;;

@@ -121,7 +121,7 @@ if [ ! -d /opt/network-computer ]; then
 else
   git -C /opt/network-computer pull -q
 fi
-( cd /opt/network-computer && go build -o /usr/local/bin/ ./cmd/... )
+( cd /opt/network-computer && go build -buildvcs=false -o /usr/local/bin/ ./cmd/... )
 
 echo ">> identity (generated once; on the desk when there is one)"
 install -d /etc/nc
