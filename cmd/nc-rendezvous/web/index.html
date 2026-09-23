@@ -163,6 +163,9 @@
   #voicelog .you{color:#fff} #voicelog .you::before{content:"You: ";color:#9ab}
   #voicelog .ai{color:#bfe0ff} #voicelog .ai::before{content:"Desk: ";color:#7ab}
   #voicelog .did{color:#9d9;font-size:13px} #voicelog .err{color:#fb8;font-size:13px}
+  #soundhint{position:fixed;top:calc(12px + env(safe-area-inset-top,0px));right:12px;z-index:36;display:none;
+    background:#d33;color:#fff;border:0;border-radius:8px;padding:8px 12px;font-size:14px;cursor:pointer}
+  #soundhint.on{display:block}
   #clipbox{position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0}
 </style>
 
@@ -232,6 +235,7 @@
     <select id="d-kbd" title="The layout of the keyboard on this device"></select>
     <label id="d-cmdl" title="⌘C, ⌘V, ⌘Z… work as Ctrl shortcuts on the desk" hidden><input type="checkbox" id="d-cmd"> ⌘ = Ctrl</label>
   </div>
+  <button id="soundhint">🔇 Sound is off: click for sound</button>
   <button id="voicefab" title="Talk to the desk (voice on/off)">🎙️</button>
   <div id="voicepanel"><div id="voicehead"><b id="voicestate">Voice off</b><label title="Off: one phrase per click. On: keeps listening until you click again."><input type="checkbox" id="voicekeep"> keep listening</label><button id="voiceclose" title="Hide">✕</button></div><div id="voicelog"></div></div>
   <div id="focushint">⌨️ Typing is going to another app. Click here to type on the desk.</div>
@@ -404,7 +408,7 @@ async function openPeer(){
     // Reliable attach: unmute for audio, then force playback (connect was a user gesture).
     video.muted=false;
     video.play().catch(()=>{ // autoplay blocked → retry muted so at least video shows
-      video.muted=true; video.play().catch(()=>{});
+      video.muted=true; video.play().catch(()=>{}); soundHint();
     });
   };
   pc.onicecandidate=e=>{if(e.candidate) sig({type:'ice',to:hostName,candidate:e.candidate.toJSON()});};
@@ -847,6 +851,19 @@ function offerDownload(name,blob){
   box.appendChild(a); box.classList.add('on');
   toast(`From the desk: ${name} (click 📥 to save)`);
 }
+/* ---------- sound ---------- */
+// Browsers may refuse to start audio without a click, and then the page plays
+// the video muted. Say so, and unmute at the first click or key press.
+function soundHint(){ $('#soundhint').classList.toggle('on', !!$('#v').muted && !!pc); }
+function unmute(){
+  const v=$('#v');
+  if(!v.muted) return;
+  v.muted=false; v.play().then(()=>{ $('#soundhint').classList.remove('on'); toast('Sound on'); }).catch(()=>{ v.muted=true; soundHint(); });
+}
+$('#soundhint').onclick=unmute;
+window.addEventListener('pointerdown',unmute,true);
+window.addEventListener('keydown',unmute,true);
+
 /* ---------- voice ---------- */
 // 🎙️ turns listening on the desk on and off (nc-voice hears the microphone
 // this page already sends). The panel shows what it heard, said and did.
