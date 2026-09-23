@@ -431,14 +431,13 @@ class Voice:
         doer.start()   # act and speak at the same time
         self.history += [{"role": "user", "content": text},
                          {"role": "assistant", "content": json.dumps({"say": say, "actions": actions})}]
-        if say:
-            event("said", say)
-            self.speak(say, mark)
+        if say:   # the text appears as the voice starts, not before
+            self.speak(say, mark, on_start=lambda: event("said", say))
         doer.join()
         steps = " ".join(f"{n} {b - a:.2f}" for (_, a), (n, b) in zip(t, t[1:]))
         log(f"timing: {steps} total-to-voice {dict(t).get('voice', t[-1][1]) - t[0][1]:.2f}s")
 
-    def speak(self, text, mark=lambda name: None):
+    def speak(self, text, mark=lambda name: None, on_start=lambda: None):
         self.speaking.set()
         try:
             if self.piper:   # stream: the first sentence plays while the rest is made
@@ -450,6 +449,7 @@ class Voice:
                     if started is None:
                         started = time.monotonic()
                         mark("voice")
+                        on_start()
                     p.stdin.write(chunk.audio_int16_bytes)
                     p.stdin.flush()
                     samples += len(chunk.audio_int16_bytes) // 2
@@ -460,6 +460,7 @@ class Voice:
             else:
                 audio = self.obj.tts(text)
                 mark("voice")
+                on_start()
                 subprocess.run(["ffmpeg", "-loglevel", "error", "-i", "pipe:0", "-f", "pulse", "nc-voice"],
                                input=audio, timeout=120)
             mark("spoken")

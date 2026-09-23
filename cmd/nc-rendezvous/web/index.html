@@ -870,13 +870,19 @@ window.addEventListener('keydown',unmute,true);
 // One click = one phrase: the desk stops listening when the phrase ends, and
 // the microphone goes back off if voice turned it on. "keep listening" makes
 // it continuous until the button is clicked again.
-let voiceOn=false, micByVoice=false;
+let voiceOn=false, micByVoice=false, micOffTimer=0;
 $('#voicekeep').checked=store.get('voicekeep','')==='1';
 $('#voicekeep').onchange=()=>store.set('voicekeep',$('#voicekeep').checked?'1':'');
 const VOICE_STATE={listening:'Listening…',hearing:'Hearing you…',thinking:'Thinking…',off:'Voice off'};
 function voiceShow(on){
   voiceOn=on; $('#voicefab').classList.toggle('on',on);
-  if(!on){ $('#voicestate').textContent='Voice off'; if(micByVoice){ micByVoice=false; setMic(false); } }
+  clearTimeout(micOffTimer);
+  if(!on){
+    $('#voicestate').textContent='Voice off';
+    // the reply's last words are still on their way: stopping the mic now
+    // makes Safari switch audio modes and cut them off
+    if(micByVoice) micOffTimer=setTimeout(()=>{ if(!voiceOn&&micByVoice){ micByVoice=false; setMic(false); } },1500);
+  }
 }
 async function setVoice(on){
   if(!ctlOpen()) return;
