@@ -52,6 +52,14 @@ set -a; . /etc/nc/env 2>/dev/null; set +a   # export, so the checks below see th
 check "rendezvous accepts the password"  sh -c 'curl -sf -o /dev/null -u "nc:$NC_PASSWORD" http://127.0.0.1:8765/hosts'
 check "host name recorded in /etc/nc/env" test -n "$NC_HOST_NAME"
 check "host registered as '$NC_HOST_NAME'" sh -c 'curl -sf -u "nc:$NC_PASSWORD" http://127.0.0.1:8765/hosts | grep -q "\"$NC_HOST_NAME\""'
+if [ -n "$NC_DOMAIN" ]; then
+  echo "https ($NC_DOMAIN)"
+  check "DNS points $NC_DOMAIN here"      sh -c '[ "$(getent ahostsv4 "$NC_DOMAIN" | awk "NR==1{print \$1}")" = "$NC_PUBLIC_IP" ]'
+  check "valid certificate (no -k)"       sh -c 'curl -sf -o /dev/null --max-time 20 "https://$NC_DOMAIN/"'
+  check "reports secure mode"             sh -c 'curl -sf -X POST --max-time 10 "https://$NC_DOMAIN/auth" -d "{\"user\":\"nc\",\"password\":\"$NC_PASSWORD\"}" | grep -q "\"mode\":\"secure\""'
+  check "local host listener (loopback)"  sh -c 'curl -sf -o /dev/null -u "nc:$NC_PASSWORD" http://127.0.0.1:8765/hosts'
+  check "firewall allows 80,443/tcp"      sh -c 'ufw status | grep -q "^80/tcp" && ufw status | grep -q "^443/tcp"'
+fi
 echo
 echo "$PASS ok, $FAIL failed"
 [ "$FAIL" -eq 0 ]

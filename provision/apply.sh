@@ -18,6 +18,11 @@ if [ -z "$NC_HOST_NAME" ] && [ -f /etc/nc/env ]; then
   NC_HOST_NAME=$(sed -n 's/^NC_HOST_NAME=//p' /etc/nc/env)
 fi
 NC_HOST_NAME=${NC_HOST_NAME:-cloudbox}
+# Optional public hostname for a real (Let's Encrypt) certificate. Browsers only
+# grant the microphone to secure pages, so this is what makes browser mic work.
+if [ -z "$NC_DOMAIN" ] && [ -f /etc/nc/env ]; then
+  NC_DOMAIN=$(sed -n 's/^NC_DOMAIN=//p' /etc/nc/env)
+fi
 
 # What each service depends on. apply.sh restarts a running service only when
 # one of these changed, so re-provisioning takes effect without killing the
@@ -79,10 +84,16 @@ NC_PASSWORD=$(head -c 12 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 16
 NC_PIN=$(shuf -i 100000-999999 -n 1)
 NC_PUBLIC_IP=${NC_PUBLIC_IP}
 NC_HOST_NAME=${NC_HOST_NAME}
+NC_DOMAIN=${NC_DOMAIN}
 EOT
   chmod 600 /etc/nc/env
 else
   sed -i "s/^NC_PUBLIC_IP=.*/NC_PUBLIC_IP=${NC_PUBLIC_IP}/" /etc/nc/env
+  if grep -q '^NC_DOMAIN=' /etc/nc/env; then
+    sed -i "s/^NC_DOMAIN=.*/NC_DOMAIN=${NC_DOMAIN}/" /etc/nc/env
+  else
+    echo "NC_DOMAIN=${NC_DOMAIN}" >> /etc/nc/env
+  fi
   if grep -q '^NC_HOST_NAME=' /etc/nc/env; then
     sed -i "s/^NC_HOST_NAME=.*/NC_HOST_NAME=${NC_HOST_NAME}/" /etc/nc/env
   else
@@ -92,6 +103,7 @@ fi
 
 echo ">> firewall"
 ufw allow 22/tcp >/dev/null; ufw allow 8765/tcp >/dev/null
+ufw allow 80/tcp >/dev/null; ufw allow 443/tcp >/dev/null   # Let's Encrypt + https
 ufw allow 3478/udp >/dev/null; ufw allow 49152:65535/udp >/dev/null
 ufw --force enable >/dev/null
 
@@ -116,5 +128,5 @@ echo ">> verify"
 sleep 3
 sh "$(dirname "$0")/verify.sh" || echo "!! verify found problems above"
 echo
-echo "rendezvous: http://${NC_PUBLIC_IP}:8765"
+if [ -n "$NC_DOMAIN" ]; then echo "rendezvous: https://${NC_DOMAIN}"; else echo "rendezvous: http://${NC_PUBLIC_IP}:8765"; fi
 cat /etc/nc/env

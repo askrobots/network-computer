@@ -200,7 +200,8 @@ func main() {
 	stateDir := flag.String("state-dir", defaultStateDir(), "where the self-signed cert and ACME cache live")
 	authUser := flag.String("user", envOr("NC_USER", "nc"), "username (env NC_USER)")
 	authPass := flag.String("password", os.Getenv("NC_PASSWORD"), "password (env NC_PASSWORD); generated and printed if empty")
-	acmeDomain := flag.String("acme-domain", "", "get a Let's Encrypt cert for this domain (listens on :443 and :80)")
+	acmeDomain := flag.String("acme-domain", os.Getenv("NC_DOMAIN"), "get a Let's Encrypt cert for this domain, listening on :443 and :80 (env NC_DOMAIN)")
+	localAddr := flag.String("local", "", "with TLS on, also serve plain HTTP on this loopback address (e.g. 127.0.0.1:8765) for an nc-host on the same machine")
 	flag.Parse()
 
 	if *authPass == "" {
@@ -326,6 +327,23 @@ func main() {
 
 	srv := &http.Server{Addr: *httpAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 
+	// A plain listener for processes on this machine (the co-located nc-host)
+	// when the public side is TLS. Loopback only: it never leaves the box.
+	startLocal := func() {
+		if *localAddr == "" {
+			return
+		}
+		host, _, err := net.SplitHostPort(*localAddr)
+		if ip := net.ParseIP(host); err != nil || ip == nil || !ip.IsLoopback() {
+			log.Fatalf("-local must be a loopback address like 127.0.0.1:8765, not %q", *localAddr)
+		}
+		log.Printf("local plain HTTP on %s (loopback only)", *localAddr)
+		go func() {
+			ls := &http.Server{Addr: *localAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+			log.Fatal(ls.ListenAndServe())
+		}()
+	}
+
 	switch {
 	case *acmeDomain != "":
 		m := &autocert.Manager{
@@ -337,9 +355,11 @@ func main() {
 		srv.TLSConfig = &tls.Config{GetCertificate: m.GetCertificate, MinVersion: tls.VersionTLS12}
 		go http.ListenAndServe(":80", m.HTTPHandler(nil))
 		log.Printf("secure mode: HTTPS on :443 for %s (ACME)", *acmeDomain)
+		startLocal()
 		log.Fatal(srv.ListenAndServeTLS("", ""))
 	case *certFile != "":
 		srv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+		startLocal()
 		log.Printf("secure mode: HTTPS on %s  (web client: https://%s%s/)", *httpAddr, *publicHost, portSuffix(*httpAddr))
 		if fingerprint != "" {
 			log.Printf("self-signed cert. Pin this fingerprint in clients (-tls-fingerprint / NC_TLS_FP):")
