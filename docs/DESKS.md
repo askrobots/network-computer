@@ -169,6 +169,42 @@ audit trail, and the same permission engine decides what the AI may see and do f
 - **The wow moment:** talking to the computer and watching the AI act (the voice loop).
 - **Polish:** their own domain (`demo.company.com`), branding, optional session recording.
 
+## The object server as front door and machine starter
+
+`object.dbbasic.com` (the object server, always on) can become both the **login system** and
+the thing that **starts Linux machines** for people. That is a superpower well beyond desks.
+
+**Machines as objects.** A machine becomes a record with a schema (owner, size, region, state,
+cost so far), actions (start, stop, snapshot), the same permission engine, an audit trail, and a
+list or board in the generative UI like tasks and notes. Then anything can ask for compute:
+- people: their desk, a demo desk, a build box;
+- jobs: a nightly Flutter build, a dbbasic-video processing run, a test suite (boot, run, destroy);
+- **the AI itself:** a disposable machine is the ideal sandbox to run code or drive a GUI, then
+  destroy, without touching anyone's desk;
+- app packages that declare "I need a worker".
+
+**Hostnames and logins.**
+- One always-on front door. People log in with object server accounts; the rendezvous accepts
+  tokens issued by the object server, so there is no shared password, and `/hosts` lists only the
+  caller's own desks. The PIN remains only for sharing (guest links, demos).
+- **Desks need no hostname.** A desk boots with a one-time token (cloud-init user data), connects
+  out to the front door's rendezvous, and media still flows device to device with the always-on
+  relay as fallback. No DNS record per desk, no certificate per desk (so no Let's Encrypt weekly
+  limit), no dangling records.
+- Flow: open one address, log in, see "Your desk: asleep", press Start (or it starts on connect).
+  Company sign-in (Google, Microsoft, Okta) arrives later through the object server.
+
+**Cautions.**
+- `object.dbbasic.com` is the **production** server behind dbbasic.com (same IP). Build this as an
+  object server package ("machines") on a **separate dev instance** first; move it once proven.
+- The DigitalOcean token is the crown jewel: a **custom-scoped** token that can create and destroy
+  machines and attach volumes, never delete volumes or DNS; ideally a separate DigitalOcean project
+  with spending alerts; only resources tagged as desks are ever touched.
+- Run the rendezvous and relay on their **own small always-on server**, not on the web server:
+  relay bandwidth should not compete with the public site. The object server does auth and control.
+- A reconciliation loop finds orphans (a crash mid-create) by comparing tagged machines with records.
+- Per-user budgets and caps: anything public that spends money attracts abuse.
+
 ## Build order
 
 1. **Desk volume** (1 GB per user), a real user account whose locker folders live on it, secrets /
@@ -182,5 +218,7 @@ audit trail, and the same permission engine decides what the AI may see and do f
    schedules, audit log.
 6. **Adaptive bitrate and data-saver profile.**
 7. **Sales kit:** guest links, presentation mode, demo reset.
-8. **Company sign-in, one desk per person, region-free identity** in the object server.
-9. Nearest-region selection, single-device revoke.
+8. **Object server front door:** logins and tokens for the rendezvous, per-user desks with no
+   hostnames, and a "machines" package that starts and stops them (dev instance first).
+9. **Company sign-in, region-free identity** in the object server.
+10. Nearest-region selection, single-device revoke.
