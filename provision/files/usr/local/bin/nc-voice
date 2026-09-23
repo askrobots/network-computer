@@ -175,23 +175,49 @@ def installed_apps():
 APPS = installed_apps()
 
 
+def find_app(name):
+    if name in APPS:
+        return name
+    n = name.lower()
+    match = [k for k, v in APPS.items() if n in (k + " " + v).lower()]
+    return match[0] if match else None
+
+
+def raise_app(app):
+    """Bring an app's window forward if it has one; True if it did."""
+    for key in {app.split(".")[-1].lower(), APPS.get(app, "").lower()}:
+        if key and (desk("wmctrl", "-x", "-a", key).returncode == 0 or desk("wmctrl", "-a", key).returncode == 0):
+            return True
+    return False
+
+
+def launch(app):
+    subprocess.Popen(["nc-as-user", "gtk-launch", app], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
 def act(a):
-    """Do one action from the AI; return what was done, for the transcript."""
+    """Do one action from the AI; return what was done, for the transcript.
+    Opening and switching check the desktop as it is now, whatever the AI
+    believes: the user opens and closes things too."""
     kind = a.get("do")
     if kind == "open_app":
-        app = a.get("app", "")
-        if app not in APPS:
-            match = [k for k, v in APPS.items() if app.lower() in (k + " " + v).lower()]
-            if not match:
-                raise RuntimeError(f"no app called {app}")
-            app = match[0]
-        subprocess.Popen(["nc-as-user", "gtk-launch", app], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        return f"opened {APPS.get(app, app)}"
+        name = a.get("app", "")
+        app = find_app(name)
+        if not app:
+            raise RuntimeError(f"no app called {name}")
+        if raise_app(app):
+            return f"switched to {APPS[app]} (already open)"
+        launch(app)
+        return f"opened {APPS[app]}"
     if kind == "switch":
         w = a.get("window", "")
-        if desk("wmctrl", "-a", w).returncode != 0:
-            raise RuntimeError(f"no window like {w}")
-        return f"switched to {w}"
+        if desk("wmctrl", "-a", w).returncode == 0:
+            return f"switched to {w}"
+        app = find_app(w)
+        if app:   # not open (any more): start it
+            launch(app)
+            return f"{APPS[app]} was not open: opened it"
+        raise RuntimeError(f"no window like {w}")
     if kind == "close":
         w = a.get("window", "")
         if desk("wmctrl", "-c", w).returncode != 0:
@@ -231,7 +257,10 @@ Actions, done in order:
   {"do": "type", "text": "<text to type into the focused window>"}
   {"do": "keys", "keys": "<xdotool key names, e.g. ctrl+s or Return>"}
   {"do": "search", "query": "<text>"}   (opens the desk's search bar with this query)
-Use no actions when they are just talking or asking something. Web searches: open a
+Use no actions when they are just talking or asking something.
+Each message ends with the desktop as it is right now (open windows). Trust that over
+anything said earlier: the user opens and closes windows themselves. When asked to open
+something, use open_app even if you opened it before (it switches to it if it is open). Web searches: open a
 URL such as https://duckduckgo.com/?q=... . Their files are in ~/Desktop and
 ~/Documents. Speech recognition makes mistakes: guess the likely meaning."""
 
@@ -239,8 +268,8 @@ URL such as https://duckduckgo.com/?q=... . Their files are in ~/Desktop and
 def context():
     wins = open_windows()
     apps = ", ".join(f"{k} ({v})" for k, v in APPS.items())
-    return (f"Open windows: {json.dumps(wins)}\nInstalled apps (id (name)): {apps}\n"
-            f"Time: {time.strftime('%A %Y-%m-%d %H:%M')}")
+    return (f"[Desktop right now: open windows {json.dumps(wins)}; "
+            f"time {time.strftime('%A %Y-%m-%d %H:%M')}]\n[Installed apps, id (name): {apps}]")
 
 
 def parse_reply(reply):
@@ -388,6 +417,8 @@ def main():
             r = c.getresponse()
             log("connected to nc-host")
             for line in r:
+                if not line.strip():
+                    continue
                 cmd = json.loads(line).get("cmd")
                 if cmd == "on":
                     v.start()
