@@ -14,7 +14,9 @@ Standard library only. Configuration from the environment:
   NC_DESK_USER          the object server user to act as (default: this user)
   NC_OBJECT_SERVER      default http://127.0.0.1:8001
   NC_VOICE_MODEL        default anthropic:claude-haiku-4-5
-  NC_VOICE_TTS          openai (default) or local
+  NC_VOICE_TTS          piper (default when installed: local, starts speaking in
+                        about half a second), openai, or local (espeak)
+  NC_PIPER_VOICE        default /opt/piper/voices/en_US-lessac-medium.onnx
   NC_VOICE_SOURCE       pulse source to listen to, default nc-mic-in
   NC_HOST_SOCKET        default /run/nc-host/send.sock
 """
@@ -40,7 +42,12 @@ OBJ = os.environ.get("NC_OBJECT_SERVER", "http://127.0.0.1:8001").rstrip("/")
 ADMIN = os.environ.get("DBBASIC_ADMIN_TOKEN", "")
 USER = os.environ.get("NC_DESK_USER") or os.environ.get("USER", "")
 MODEL = os.environ.get("NC_VOICE_MODEL", "anthropic:claude-haiku-4-5")
-TTS = os.environ.get("NC_VOICE_TTS", "openai")
+try:   # Piper: fast local speech; present when nc-voice runs on /opt/piper's python
+    from piper import PiperVoice
+except ImportError:
+    PiperVoice = None
+TTS = os.environ.get("NC_VOICE_TTS", "piper" if PiperVoice else "openai")
+PIPER_VOICE = os.environ.get("NC_PIPER_VOICE", "/opt/piper/voices/en_US-lessac-medium.onnx")
 SOURCE = os.environ.get("NC_VOICE_SOURCE", "nc-mic-in")
 SOCK = os.environ.get("NC_HOST_SOCKET", "/run/nc-host/send.sock")
 
@@ -48,7 +55,7 @@ RATE = 16000
 FRAME = 320            # 20 ms of 16-bit mono
 PREROLL = 15           # frames kept from before speech starts (300 ms)
 START = 3              # loud frames that start an utterance
-END = 45               # quiet frames that end one (900 ms)
+END = 35               # quiet frames that end one (700 ms)
 MAX_FRAMES = 30 * 50   # 30 s
 MIN_SPEECH = 20        # 400 ms of speech, or it was a noise
 
@@ -257,7 +264,8 @@ Actions, done in order:
   {"do": "type", "text": "<text to type into the focused window>"}
   {"do": "keys", "keys": "<xdotool key names, e.g. ctrl+s or Return>"}
   {"do": "search", "query": "<text>"}   (opens the desk's search bar with this query)
-Use no actions when they are just talking or asking something.
+Use no actions when they are just talking or asking something. When you take actions,
+keep "say" to a few words ("Opening Firefox.") or leave it empty.
 Each message ends with the desktop as it is right now (open windows). Trust that over
 anything said earlier: the user opens and closes windows themselves. When asked to open
 something, use open_app even if you opened it before (it switches to it if it is open). Web searches: open a
@@ -305,6 +313,10 @@ def to_wav(frames):
 class Voice:
     def __init__(self):
         self.obj = ObjectServer()
+        self.piper = None
+        if TTS == "piper" and PiperVoice:
+            self.piper = PiperVoice.load(PIPER_VOICE)
+            list(self.piper.synthesize("Ready."))   # warm up: the first run is slow
         self.on = False
         self.speaking = threading.Event()
         self.rec = None
@@ -359,6 +371,7 @@ class Voice:
                 quiet += 1
             if quiet >= END or len(cur) >= MAX_FRAMES:
                 if speech >= MIN_SPEECH:
+                    chime()
                     self.utterances.put(to_wav(cur))
                 elif self.on:
                     event("state", "listening")
@@ -377,33 +390,76 @@ class Voice:
                 event("state", "listening")
 
     def handle(self, wav):
+        t = [("start", time.monotonic())]
+        mark = lambda name: t.append((name, time.monotonic()))
         event("state", "thinking")
         text = self.obj.stt(wav)
+        mark("stt")
         if not text:
             return
         event("heard", text)
         reply = self.obj.chat(text + "\n\n" + context(), self.history[-12:], SYSTEM)
+        mark("ai")
         say, actions = parse_reply(reply)
-        for a in actions:
-            try:
-                event("did", act(a))
-            except Exception as e:
-                event("error", str(e))
+
+        def do_actions():
+            for a in actions:
+                try:
+                    event("did", act(a))
+                except Exception as e:
+                    event("error", str(e))
+        doer = threading.Thread(target=do_actions)
+        doer.start()   # act and speak at the same time
         self.history += [{"role": "user", "content": text},
                          {"role": "assistant", "content": json.dumps({"say": say, "actions": actions})}]
         if say:
             event("said", say)
-            self.speak(say)
+            self.speak(say, mark)
+        doer.join()
+        steps = " ".join(f"{n} {b - a:.2f}" for (_, a), (n, b) in zip(t, t[1:]))
+        log(f"timing: {steps} total-to-voice {dict(t).get('voice', t[-1][1]) - t[0][1]:.2f}s")
 
-    def speak(self, text):
-        audio = self.obj.tts(text)
+    def speak(self, text, mark=lambda name: None):
         self.speaking.set()
         try:
-            subprocess.run(["ffmpeg", "-loglevel", "error", "-i", "pipe:0", "-f", "pulse", "nc-voice"],
-                           input=audio, timeout=120)
+            if self.piper:   # stream: the first sentence plays while the rest is made
+                rate = self.piper.config.sample_rate
+                p = subprocess.Popen(["ffmpeg", "-loglevel", "error", "-f", "s16le", "-ar", str(rate), "-ac", "1",
+                                      "-i", "pipe:0", "-f", "pulse", "nc-voice"], stdin=subprocess.PIPE)
+                started, samples = None, 0
+                for chunk in self.piper.synthesize(text):
+                    if started is None:
+                        started = time.monotonic()
+                        mark("voice")
+                    p.stdin.write(chunk.audio_int16_bytes)
+                    p.stdin.flush()
+                    samples += len(chunk.audio_int16_bytes) // 2
+                p.stdin.close()
+                p.wait(timeout=120)
+                if started is not None:   # ffmpeg exits once pulse has the audio, not once it's heard
+                    time.sleep(max(0.0, samples / rate - (time.monotonic() - started)))
+            else:
+                audio = self.obj.tts(text)
+                mark("voice")
+                subprocess.run(["ffmpeg", "-loglevel", "error", "-i", "pipe:0", "-f", "pulse", "nc-voice"],
+                               input=audio, timeout=120)
+            mark("spoken")
         finally:
             time.sleep(0.3)   # let the tail of our own voice pass the mic
             self.speaking.clear()
+
+
+def chime():
+    """A soft two-note blip: heard you, working on it."""
+    rate, out = 22050, array.array("h")
+    for freq, dur in ((880, 0.07), (1320, 0.09)):
+        n = int(rate * dur)
+        for i in range(n):
+            env = min(1, i / 200, (n - i) / 400)
+            out.append(int(5000 * env * math.sin(2 * math.pi * freq * i / rate)))
+    subprocess.Popen(["ffmpeg", "-loglevel", "error", "-f", "s16le", "-ar", str(rate), "-ac", "1",
+                      "-i", "pipe:0", "-f", "pulse", "nc-chime"],
+                     stdin=subprocess.PIPE).communicate(out.tobytes())
 
 
 def main():

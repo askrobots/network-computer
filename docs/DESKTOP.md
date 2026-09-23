@@ -111,9 +111,16 @@ you, thinking) and every turn: what it heard, what it said, what it did.
 - Tested with synthesized speech: "What time is it?" answered correctly (about 9 s
   including the spoken reply); "Open the text editor" opened Mousepad (about 6 s).
 
-Next: faster (stream the reply, speak the first sentence first; local whisper.cpp and
-Piper), a wake word, reading the screen, the clipboard and files as context, and the
-object server's own records and tools.
+Speed (measured per step, after the end of speech, synthesized questions): speech to
+text 0.6–1.2 s, AI 0.8–1.2 s, then speech now comes from **Piper** on the desk (open
+source, `en_US-lessac-medium`), streamed so the first sentence plays while the rest is
+made: 0.4–0.7 s to first sound, against 0.9–2.7 s for OpenAI's speech. Time until the desk
+answers: 2–3 s, down from 3–5 s. A soft chime says it heard you; the end-of-speech pause
+is 0.7 s; actions run while it speaks, with a few words ("Opening Firefox.").
+
+Next: local speech to text (whisper.cpp) to cut the remaining network trip, a wake word,
+reading the screen, the clipboard and files as context, and the object server's own
+records and tools.
 
 ## 5. Your session comes back
 

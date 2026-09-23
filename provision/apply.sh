@@ -80,7 +80,7 @@ deps() {
     rendezvous) echo /etc/systemd/system/nc-rendezvous.service /etc/systemd/system/nc-rendezvous.service.d/*.conf /usr/local/bin/nc-rendezvous /etc/nc/env ;;
     host)       echo /etc/systemd/system/nc-host.service /etc/systemd/system/nc-host.service.d/*.conf /usr/local/bin/nc-host /etc/nc/env ;;
     object-server) echo /etc/systemd/system/nc-object-server.service /etc/systemd/system/nc-object-server.service.d/*.conf /etc/nc/object-server.env /opt/dbbasic-object-server/.git/HEAD /opt/dbbasic-object-server/.git/refs/heads/main ;;
-    voice)      echo /etc/systemd/system/nc-voice.service /etc/systemd/system/nc-voice.service.d/*.conf /usr/local/bin/nc-voice /etc/nc/object-server.env ;;
+    voice)      echo /etc/systemd/system/nc-voice.service /etc/systemd/system/nc-voice.service.d/*.conf /usr/local/bin/nc-voice /etc/nc/object-server.env /opt/piper/voices/en_US-lessac-medium.onnx.json ;;
   esac
 }
 snapshot() { for s in xorg desktop audio rendezvous host object-server voice; do echo "$s $(cat $(deps $s) 2>/dev/null | md5sum | cut -c1-12)"; done; }
@@ -220,6 +220,11 @@ for f in ENABLE_AI_CHAT ENABLE_TTS ENABLE_STT ENABLE_READER ENABLE_SITE_ROUTES E
          ENABLE_PASSWORD_LOGIN ENABLE_PERMISSION_ENFORCEMENT; do oset DBBASIC_$f true; done
 oset DBBASIC_COOKIE_SECURE false
 chmod 600 "$(readlink -f $OSENV)"   # root only: systemd reads it before switching to the user
+echo ">> Piper (local text to speech for nc-voice)"
+[ -x /opt/piper/bin/python ] || python3 -m venv /opt/piper
+/opt/piper/bin/python -c 'import piper' 2>/dev/null || /opt/piper/bin/pip install -q piper-tts
+install -d /opt/piper/voices
+[ -s /opt/piper/voices/en_US-lessac-medium.onnx ] || ( cd /opt/piper/voices && /opt/piper/bin/python -m piper.download_voices en_US-lessac-medium >/dev/null 2>&1 )
 for s in nc-object-server nc-voice; do
   install -d /etc/systemd/system/$s.service.d
   printf '[Service]\nUser=%s\nGroup=%s\n' "$NC_DESK_USER" "$NC_DESK_USER" > /etc/systemd/system/$s.service.d/user.conf
