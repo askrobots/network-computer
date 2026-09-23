@@ -14,7 +14,7 @@ import (
 // Voice relay between the client's 🎙️ button and nc-voice on the desk, over
 // the host's local socket (the one nc-send uses):
 //   - GET  /voice/commands: nc-voice's long-lived stream of {"cmd":"on"|"off"}
-//     lines (and a "ping" every 30 s);
+//     lines ("once": stop after one phrase; and a "ping" every 30 s);
 //   - POST /voice/event {"kind","text"}: what nc-voice heard, said or did,
 //     passed to every connected client as {"t":"voice","kind","text"}.
 type voiceRelay struct {
@@ -23,14 +23,17 @@ type voiceRelay struct {
 }
 
 // command tells nc-voice to start or stop listening; false if it isn't running.
-func (v *voiceRelay) command(on bool) bool {
+func (v *voiceRelay) command(on, once bool) bool {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	if v.sub == nil {
 		return false
 	}
 	cmd := `{"cmd":"off"}`
-	if on {
+	switch {
+	case on && once:
+		cmd = `{"cmd":"on","once":true}`
+	case on:
 		cmd = `{"cmd":"on"}`
 	}
 	select {

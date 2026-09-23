@@ -94,8 +94,10 @@ will drive the same actions. Later: document contents (Recoll), a calculator, we
 
 ## Voice (first version works, 2026-09-23)
 
-The round 🎙️ button (bottom left, always visible while connected) turns listening on and
-off; it turns the microphone on if needed. A panel shows the state (listening, hearing
+The round 🎙️ button (bottom left, always visible while connected) is one click per
+phrase: click, say one thing, and it stops listening when the phrase ends (or after 8 s
+of silence), answers, and turns the microphone back off if it turned it on. "keep
+listening" in the panel makes it continuous until clicked again. A panel shows the state (listening, hearing
 you, thinking) and every turn: what it heard, what it said, what it did.
 
 - `nc-voice` on the desk listens to the client's microphone (the `nc-mic-in` source),

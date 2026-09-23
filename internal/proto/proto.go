@@ -59,5 +59,6 @@ type InputEvent struct {
 	// voice: On starts or stops listening (client to host); Kind says what an
 	// event from the desk is: state, heard, said, did, error.
 	On   bool   `json:"on,omitempty"`
+	Once bool   `json:"once,omitempty"` // voice: stop listening after one phrase
 	Kind string `json:"kind,omitempty"`
 }

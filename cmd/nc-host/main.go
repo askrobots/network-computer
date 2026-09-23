@@ -239,7 +239,7 @@ func (h *host) handleOffer(ctx context.Context, m proto.Message) {
 		nobody := len(h.sessions) == 0
 		h.mu.Unlock()
 		if nobody {
-			h.voice.command(false) // no one to listen to
+			h.voice.command(false, false) // no one to listen to
 		}
 	}
 
@@ -328,7 +328,7 @@ func (h *host) handleOffer(ctx context.Context, m proto.Message) {
 				go launch()
 				return
 			case "voice":
-				if !h.voice.command(ev.On) {
+				if !h.voice.command(ev.On, ev.Once) {
 					b, _ := json.Marshal(proto.InputEvent{T: "voice", Kind: "error", Text: "voice is not running on this desk"})
 					dc.SendText(string(b))
 				}

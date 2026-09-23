@@ -157,6 +157,7 @@
     border:1px solid var(--line);border-radius:10px;font-size:14px;box-shadow:0 6px 20px rgba(0,0,0,.4)}
   #voicepanel.show{display:flex}
   #voicehead{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line)}
+  #voicehead label{display:flex;align-items:center;gap:4px;font-size:12px;color:#abc;margin-left:auto;margin-right:10px}
   #voicehead button{background:none;border:0;color:inherit;font-size:16px;cursor:pointer}
   #voicelog{overflow:auto;padding:8px 12px;display:flex;flex-direction:column;gap:6px}
   #voicelog .you{color:#fff} #voicelog .you::before{content:"You: ";color:#9ab}
@@ -232,7 +233,7 @@
     <label id="d-cmdl" title="⌘C, ⌘V, ⌘Z… work as Ctrl shortcuts on the desk" hidden><input type="checkbox" id="d-cmd"> ⌘ = Ctrl</label>
   </div>
   <button id="voicefab" title="Talk to the desk (voice on/off)">🎙️</button>
-  <div id="voicepanel"><div id="voicehead"><b id="voicestate">Voice off</b><button id="voiceclose" title="Hide">✕</button></div><div id="voicelog"></div></div>
+  <div id="voicepanel"><div id="voicehead"><b id="voicestate">Voice off</b><label title="Off: one phrase per click. On: keeps listening until you click again."><input type="checkbox" id="voicekeep"> keep listening</label><button id="voiceclose" title="Hide">✕</button></div><div id="voicelog"></div></div>
   <div id="focushint">⌨️ Typing is going to another app. Click here to type on the desk.</div>
   <div id="dropzone">Drop to send to the desk's Desktop</div>
   <div id="downloads" title="Files sent from the desk: click to save"></div>
@@ -849,16 +850,25 @@ function offerDownload(name,blob){
 /* ---------- voice ---------- */
 // 🎙️ turns listening on the desk on and off (nc-voice hears the microphone
 // this page already sends). The panel shows what it heard, said and did.
-let voiceOn=false;
+// One click = one phrase: the desk stops listening when the phrase ends, and
+// the microphone goes back off if voice turned it on. "keep listening" makes
+// it continuous until the button is clicked again.
+let voiceOn=false, micByVoice=false;
+$('#voicekeep').checked=store.get('voicekeep','')==='1';
+$('#voicekeep').onchange=()=>store.set('voicekeep',$('#voicekeep').checked?'1':'');
 const VOICE_STATE={listening:'Listening…',hearing:'Hearing you…',thinking:'Thinking…',off:'Voice off'};
-function voiceShow(on){ voiceOn=on; $('#voicefab').classList.toggle('on',on); if(!on) $('#voicestate').textContent='Voice off'; }
+function voiceShow(on){
+  voiceOn=on; $('#voicefab').classList.toggle('on',on);
+  if(!on){ $('#voicestate').textContent='Voice off'; if(micByVoice){ micByVoice=false; setMic(false); } }
+}
 async function setVoice(on){
   if(!ctlOpen()) return;
-  if(on&&!micStream){ await setMic(true); if(!micStream) return; }
+  if(on&&!micStream){ await setMic(true); if(!micStream) return; micByVoice=true; }
+  const once=!$('#voicekeep').checked;
+  ctl.send(JSON.stringify({t:'voice',on,once}));
   voiceShow(on);
   $('#voicepanel').classList.add('show');
-  $('#voicestate').textContent=on?'Starting…':'Voice off';
-  ctl.send(JSON.stringify({t:'voice',on}));
+  if(on) $('#voicestate').textContent=once?'Say one thing…':'Starting…';
 }
 function voiceLine(cls,text){
   const log=$('#voicelog'), d=document.createElement('div');

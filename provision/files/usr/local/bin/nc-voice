@@ -58,6 +58,7 @@ START = 3              # loud frames that start an utterance
 END = 35               # quiet frames that end one (700 ms)
 MAX_FRAMES = 30 * 50   # 30 s
 MIN_SPEECH = 20        # 400 ms of speech, or it was a noise
+ONCE_WAIT = 8          # seconds to wait for the one phrase before giving up
 
 
 def log(*a):
@@ -318,13 +319,16 @@ class Voice:
             self.piper = PiperVoice.load(PIPER_VOICE)
             list(self.piper.synthesize("Ready."))   # warm up: the first run is slow
         self.on = False
+        self.once = False
+        self.hearing = False
         self.speaking = threading.Event()
         self.rec = None
         self.utterances = queue.Queue()
         self.history = []
         threading.Thread(target=self.worker, daemon=True).start()
 
-    def start(self):
+    def start(self, once=False):
+        self.once = once
         if self.on:
             return
         self.on = True
@@ -333,17 +337,27 @@ class Voice:
                                     stdout=subprocess.PIPE, stdin=subprocess.DEVNULL)
         threading.Thread(target=self.listen, args=(self.rec,), daemon=True).start()
         event("state", "listening")
+        if once:
+            rec = self.rec
+            def give_up():   # nothing said: don't leave the microphone open
+                time.sleep(ONCE_WAIT)
+                if self.on and self.rec is rec and not self.hearing:
+                    event("error", "didn't hear anything")
+                    self.stop()
+            threading.Thread(target=give_up, daemon=True).start()
 
-    def stop(self):
+    def stop(self, answering=False):
         if not self.on:
             return
         self.on = False
         if self.rec:
             self.rec.terminate()
-        event("state", "off")
+        if not answering:   # else the answer is on its way; "off" follows it
+            event("state", "off")
 
     def listen(self, rec):
         pre, cur, loud, quiet, speech = [], None, 0, 0, 0
+        self.hearing = False
         floor = 300.0
         while True:
             frame = rec.stdout.read(FRAME * 2)
@@ -362,6 +376,7 @@ class Voice:
                 loud = loud + 1 if is_loud else 0
                 if loud >= START:
                     cur, quiet, speech = list(pre), 0, loud
+                    self.hearing = True
                     event("state", "hearing")
                 continue
             cur.append(frame)
@@ -370,9 +385,13 @@ class Voice:
             else:
                 quiet += 1
             if quiet >= END or len(cur) >= MAX_FRAMES:
+                self.hearing = False
                 if speech >= MIN_SPEECH:
                     chime()
                     self.utterances.put(to_wav(cur))
+                    if self.once:   # one phrase per click: stop listening now
+                        self.stop(answering=True)
+                        return
                 elif self.on:
                     event("state", "listening")
                 pre, cur, loud = [], None, 0
@@ -386,8 +405,8 @@ class Voice:
                 self.handle(wav)
             except Exception as e:  # keep listening whatever went wrong
                 event("error", str(e))
-            if self.on and self.utterances.empty():
-                event("state", "listening")
+            if self.utterances.empty():
+                event("state", "listening" if self.on else "off")
 
     def handle(self, wav):
         t = [("start", time.monotonic())]
@@ -477,7 +496,7 @@ def main():
                     continue
                 cmd = json.loads(line).get("cmd")
                 if cmd == "on":
-                    v.start()
+                    v.start(once=bool(json.loads(line).get("once")))
                 elif cmd == "off":
                     v.stop()
         except (OSError, ValueError, http.client.HTTPException) as e:
