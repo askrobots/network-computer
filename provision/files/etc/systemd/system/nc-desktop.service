@@ -1,9 +1,13 @@
 [Unit]
-Description=xfce desktop on the headless Xorg
+Description=xfce desktop on the headless Xorg (as the desk user; see nc-desktop.service.d/user.conf)
 After=nc-xorg.service
 Requires=nc-xorg.service
 [Service]
 Environment=DISPLAY=:0
+# the session needs a private runtime dir; with User= set it is owned by that user
+RuntimeDirectory=nc-desktop
+RuntimeDirectoryMode=0700
+Environment=XDG_RUNTIME_DIR=/run/nc-desktop
 ExecStartPre=/bin/sleep 2
 ExecStart=/usr/bin/dbus-launch --exit-with-session startxfce4
 ExecStartPost=/bin/sh -c "sleep 3; xset s off s noblank"

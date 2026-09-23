@@ -6,7 +6,7 @@ Requires=nc-desktop.service
 EnvironmentFile=/etc/nc/env
 Environment=DISPLAY=:0
 ExecStartPre=/bin/sleep 3
-ExecStart=/usr/local/bin/nc-host -rendezvous http://127.0.0.1:8765 -name ${NC_HOST_NAME} -size 1280x720 -fps 30 -bitrate 4M -encoder libx264 -audio-device nc.monitor -mic-device nc-mic
+ExecStart=/usr/local/bin/nc-host -rendezvous http://127.0.0.1:8765 -name ${NC_HOST_NAME} -size 1280x720 -fps 30 -bitrate 4M -encoder libx264 -audio-device nc.monitor -mic-device nc-mic -state-dir /var/lib/nc-host
 Restart=always
 [Install]
 WantedBy=multi-user.target

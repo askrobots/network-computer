@@ -60,6 +60,19 @@ if [ -n "$NC_DOMAIN" ]; then
   check "local host listener (loopback)"  sh -c 'curl -sf -o /dev/null -u "nc:$NC_PASSWORD" http://127.0.0.1:8765/hosts'
   check "firewall allows 80,443/tcp"      sh -c 'ufw status | grep -q "^80/tcp" && ufw status | grep -q "^443/tcp"'
 fi
+echo "desktop user"
+check "desktop runs as '$NC_DESK_USER', not root" sh -c 'pgrep -u "$NC_DESK_USER" -x xfce4-session && ! pgrep -u root -x xfce4-session'
+if ls /dev/disk/by-id/scsi-0DO_Volume_desk-* >/dev/null 2>&1; then
+  echo "desk"
+  check "desk mounted at /desk"            mountpoint -q /desk
+  check "desk under 80% full"              sh -c '[ "$(df --output=pcent /desk | tail -1 | tr -dc 0-9)" -lt 80 ]'
+  check "identity lives on the desk (0600)" sh -c '[ "$(readlink /etc/nc/env)" = /desk/nc/env ] && [ "$(stat -c %a /desk/nc/env)" = 600 ]'
+  check "pairing secret on the desk (0600)" sh -c '[ "$(readlink /var/lib/nc-host)" = /desk/nc/host ] && [ "$(stat -c %a /desk/nc/host/pair.key)" = 600 ]'
+  check "certificate cache on the desk"    sh -c '[ "$(readlink /var/lib/nc-rendezvous)" = /desk/nc/rendezvous ]'
+  check "locker folders live on the desk"  sh -c 'h=$(getent passwd "$NC_DESK_USER" | cut -d: -f6); for p in Documents Desktop .config; do [ "$(readlink "$h/$p")" = "/desk/home/$p" ] || exit 1; done'
+  check "secrets folder private to the user" sh -c '[ "$(stat -c %a:%U /desk/secrets)" = "700:$NC_DESK_USER" ]'
+  check "services wait for the desk at boot" sh -c 'for s in nc-host nc-rendezvous nc-desktop; do systemctl show -p RequiresMountsFor $s | grep -q /desk || exit 1; done'
+fi
 echo
 echo "$PASS ok, $FAIL failed"
 [ "$FAIL" -eq 0 ]
