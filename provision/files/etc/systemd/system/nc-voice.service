@@ -5,6 +5,9 @@ Wants=nc-object-server.service
 [Service]
 # the user comes from a drop-in (user.conf) written by apply.sh
 EnvironmentFile=/etc/nc/object-server.env
+# the helper socket lives here, owned by the desk user
+RuntimeDirectory=nc-voice
+RuntimeDirectoryMode=0700
 # /opt/piper has Piper, the fast local voice; nc-voice itself needs only the standard library
 ExecStart=/opt/piper/bin/python /usr/local/bin/nc-voice
 Restart=always

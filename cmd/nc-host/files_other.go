@@ -6,3 +6,4 @@ import "errors"
 
 func freeBytes(string) (int64, error) { return 0, errors.New("unknown") }
 func chownLike(string, string)        {}
+func ownerGroup(string) (int, bool)   { return 0, false }

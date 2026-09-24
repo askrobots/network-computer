@@ -37,7 +37,9 @@ check "search and launch bar (Alt+Space)" sh -c 'command -v rofi && command -v n
 check "object server answers (local only)" sh -c 'curl -sf http://127.0.0.1:8001/health >/dev/null && ! ss -ltn | grep -q "0.0.0.0:8001"'
 check "voice listener running (nc-voice)"   systemctl is-active --quiet nc-voice
 check "computer controller (nc-desk) sees the screen" sh -c 'nc-desk screen | grep -q "\"ok\": true"'
-check "object server sign-in helper (local only)" sh -c 'curl -s -o /dev/null -w "%{http_code}" "http://localhost:8009/open?next=/" | grep -qx 302 && ! ss -ltn | grep -q "0.0.0.0:8009"'
+check "only the needed ports are public" sh -c '! ss -ltnu | grep -E "0\.0\.0\.0:(5353|631|8001|8009|8765) |\*:(5353|631) "'
+check "desk socket for the desk user only (0660)" sh -c 'test "$(stat -c %a /run/nc-host/send.sock)" = 660'
+check "object server sign-in needs a one-time code" sh -c 'curl -s -o /dev/null -w "%{http_code}" "http://localhost:8009/open?next=/" | grep -qx 403 && ! ss -ltn | grep -q "0.0.0.0:8009" && test "$(stat -c %a /run/nc-voice)" = 700'
 check "desktop dashboard running (conky)"  pgrep -x conky
 check "object server app windows (WebKitGTK)" python3 -c "import gi; gi.require_version(\"WebKit2\", \"4.1\"); from gi.repository import WebKit2"
 check "object server daemon (notifications)" systemctl is-active --quiet nc-object-daemon

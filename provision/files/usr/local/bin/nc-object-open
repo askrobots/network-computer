@@ -1,0 +1,11 @@
+#!/bin/sh
+# Open an object server page as an app window, signed in.
+#   nc-object-open NAME PATH [ICON]      e.g. nc-object-open Talk /talk audio-input-microphone
+# Gets a one-time sign-in URL from nc-voice's helper socket (the desk user's only).
+SOCK=${NC_HELPER_SOCKET:-/run/nc-voice/helper.sock}
+URL=$(curl -s -m 5 -G --unix-socket "$SOCK" --data-urlencode "next=${2:-/}" http://helper/url)
+if [ -z "$URL" ]; then
+  notify-send -i dialog-warning "Object Server" "Can't sign in: the voice service (nc-voice) isn't running." 2>/dev/null
+  exit 1
+fi
+exec nc-webapp "${1:-Object Server}" "$URL" "${3:-applications-internet}"

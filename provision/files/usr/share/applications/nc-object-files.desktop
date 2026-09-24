@@ -2,7 +2,7 @@
 Type=Application
 Name=Files
 Comment=Your files in the object server
-Exec=nc-webapp "Files" http://localhost:8009/open?next=/files folder-remote
+Exec=nc-object-open "Files" /files folder-remote
 Icon=folder-remote
 StartupWMClass=nc-files
 Categories=Network;Office;

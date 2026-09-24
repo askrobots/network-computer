@@ -220,7 +220,16 @@ func (h *host) serveSend(path string) {
 		log.Printf("send socket: %v", err)
 		return
 	}
-	os.Chmod(path, 0o666) // the desk user runs nc-send; it streams the file itself, so it can only send what it can read
+	// Only the desk user may use it (nc-send, nc-voice): group = the owner of
+	// the files folder, mode 0660. Anyone who can write here can push files to
+	// the connected devices and speak for the voice.
+	os.Chmod(path, 0o600)
+	if h.filesDir != "" {
+		if gid, ok := ownerGroup(h.filesDir); ok {
+			os.Chown(path, 0, gid)
+			os.Chmod(path, 0o660)
+		}
+	}
 	log.Printf("send socket: %s", path)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/voice/commands", h.handleVoiceCommands)

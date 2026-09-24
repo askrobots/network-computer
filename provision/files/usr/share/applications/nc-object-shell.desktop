@@ -2,7 +2,7 @@
 Type=Application
 Name=Shell
 Comment=Commands and AI chat in the object server
-Exec=nc-webapp "Shell" http://localhost:8009/open?next=/shell utilities-terminal
+Exec=nc-object-open "Shell" /shell utilities-terminal
 Icon=utilities-terminal
 StartupWMClass=nc-shell
 Categories=Network;Office;

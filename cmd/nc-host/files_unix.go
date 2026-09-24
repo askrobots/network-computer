@@ -24,3 +24,16 @@ func chownLike(path, dir string) {
 		}
 	}
 }
+
+// ownerGroup is the group of whoever owns dir (the desk user).
+func ownerGroup(dir string) (int, bool) {
+	fi, err := os.Stat(dir)
+	if err != nil {
+		return 0, false
+	}
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok {
+		return 0, false
+	}
+	return int(st.Gid), true
+}

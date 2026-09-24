@@ -2,7 +2,7 @@
 Type=Application
 Name=Tasks
 Comment=Your tasks in the object server
-Exec=nc-webapp "Tasks" http://localhost:8009/open?next=/tasks view-list-bullet
+Exec=nc-object-open "Tasks" /tasks view-list-bullet
 Icon=view-list-bullet
 StartupWMClass=nc-tasks
 Categories=Network;Office;

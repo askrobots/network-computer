@@ -250,10 +250,16 @@ for s in nc-desktop nc-host nc-rendezvous nc-object-server nc-object-daemon nc-v
 done
 
 echo ">> firewall"
-ufw allow 22/tcp >/dev/null; ufw allow 8765/tcp >/dev/null
+ufw allow 22/tcp >/dev/null
+# with a domain the rendezvous is https on 443 and 8765 listens on loopback only
+if [ -n "$NC_DOMAIN" ]; then ufw delete allow 8765/tcp >/dev/null 2>&1 || true; else ufw allow 8765/tcp >/dev/null; fi
 ufw allow 80/tcp >/dev/null; ufw allow 443/tcp >/dev/null   # Let's Encrypt + https
 ufw allow 3478/udp >/dev/null; ufw allow 49152:65535/udp >/dev/null
 ufw --force enable >/dev/null
+# nothing on a desk needs network discovery or printing daemons
+for u in avahi-daemon.socket avahi-daemon.service cups.socket cups.service cups-browsed.service; do
+  systemctl disable --now "$u" >/dev/null 2>&1 || true
+done
 
 echo ">> services"
 AFTER=$(snapshot)

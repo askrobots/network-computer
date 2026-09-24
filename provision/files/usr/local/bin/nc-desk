@@ -223,16 +223,28 @@ def ls(path="~", pattern="*"):
     return {"path": show(d), "items": items[:300], "more": max(0, len(items) - 300)}
 
 
+def not_hidden(full):
+    """File actions stay out of hidden files and folders (~/.ssh, ~/.config...)."""
+    rel = os.path.relpath(full, os.path.realpath(HOME))
+    for home_link in os.listdir(HOME):   # desk-linked folders count as their home name
+        real = os.path.realpath(os.path.join(HOME, home_link))
+        if os.path.islink(os.path.join(HOME, home_link)) and (full == real or full.startswith(real + os.sep)):
+            rel = os.path.join(home_link, os.path.relpath(full, real))
+    if any(part.startswith(".") and part not in (".", "..") for part in rel.split(os.sep)):
+        raise Fail(f"{show(full)}: hidden files and folders are left alone")
+    return full
+
+
 def mkdir(path):
-    full = inside_home(path, must_exist=False)
+    full = not_hidden(inside_home(path, must_exist=False))
     os.makedirs(full, exist_ok=True)
     return {"made": show(full)}
 
 
 def targets(srcs, dest):
     """Where each source goes; refuses anything that would overwrite."""
-    srcs = [inside_home(s) for s in srcs]
-    d = inside_home(dest, must_exist=False)
+    srcs = [not_hidden(inside_home(s)) for s in srcs]
+    d = not_hidden(inside_home(dest, must_exist=False))
     if os.path.isdir(d):
         pairs = [(s, os.path.join(d, os.path.basename(s))) for s in srcs]
     elif len(srcs) == 1:
@@ -272,7 +284,7 @@ def copy(*args):
 def trash(*paths):
     done = []
     for p in paths:
-        full = inside_home(p)
+        full = not_hidden(inside_home(p))
         if full in {os.path.realpath(HOME)} | {os.path.realpath(os.path.join(HOME, d)) for d in os.listdir(HOME)}:
             if os.path.dirname(full) == os.path.realpath(HOME) or os.path.islink(os.path.join(HOME, os.path.basename(full))):
                 raise Fail(f"{p}: won't trash a top-level folder")

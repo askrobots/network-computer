@@ -2,7 +2,7 @@
 Type=Application
 Name=Object Server
 Comment=Your DBBASIC object server on this desk: apps, records, files
-Exec=nc-webapp "Object Server" http://localhost:8009/open?next=/ applications-internet
+Exec=nc-object-open "Object Server" / applications-internet
 Icon=applications-internet
 StartupWMClass=nc-object-server
 Categories=Network;Office;

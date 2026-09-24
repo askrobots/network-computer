@@ -2,7 +2,7 @@
 Type=Application
 Name=Notes
 Comment=Your notes in the object server
-Exec=nc-webapp "Notes" http://localhost:8009/open?next=/notes accessories-text-editor
+Exec=nc-object-open "Notes" /notes accessories-text-editor
 Icon=accessories-text-editor
 StartupWMClass=nc-notes
 Categories=Network;Office;

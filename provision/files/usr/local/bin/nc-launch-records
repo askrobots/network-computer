@@ -1,10 +1,10 @@
 #!/bin/sh
 # rofi script mode for nc-launch: search your object server records (notes,
 # tasks, files...). Type, Enter: the matches appear; pick one to open it,
-# signed in. Uses the desk's local helper (nc-voice, localhost:8009).
-H=http://localhost:8009
+# signed in. Uses nc-voice's helper socket (the desk user's only).
+SOCK=${NC_HELPER_SOCKET:-/run/nc-voice/helper.sock}
 if [ "$ROFI_RETV" = 1 ] && [ -n "$ROFI_INFO" ]; then   # picked a result
-  setsid -f xdg-open "$H/open?next=$ROFI_INFO" >/dev/null 2>&1
+  setsid -f nc-object-open "Object Server" "$ROFI_INFO" >/dev/null 2>&1
   exit 0
 fi
 q=$1
@@ -13,7 +13,7 @@ if [ -z "$q" ]; then
   exit 0
 fi
 printf '\0prompt\037records\n\0message\037Results for "%s" (Enter a new search to look again)\n' "$q"
-curl -s -m 10 -G --data-urlencode "q=$q" "$H/search" | python3 -c '
+curl -s -m 10 -G --unix-socket "$SOCK" --data-urlencode "q=$q" http://helper/search | python3 -c '
 import json, sys
 rows = json.load(sys.stdin)
 if not rows:

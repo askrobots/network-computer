@@ -298,7 +298,12 @@ func main() {
 		}
 		var body struct{ User, Password string }
 		json.NewDecoder(io.LimitReader(r.Body, 4<<10)).Decode(&body)
-		if !auth.checkCreds(body.User, body.Password) {
+		ok, limited := auth.checkCredsFrom(r, body.User, body.Password)
+		if limited {
+			http.Error(w, `{"error":"too many wrong passwords; try again in 10 minutes"}`, http.StatusTooManyRequests)
+			return
+		}
+		if !ok {
 			http.Error(w, `{"error":"bad credentials"}`, http.StatusUnauthorized)
 			return
 		}
@@ -389,6 +394,73 @@ func main() {
 type authority struct {
 	user, pass string
 	secret     []byte
+
+	mu    sync.Mutex
+	fails map[string]*failCount // wrong passwords per client address
+}
+
+type failCount struct {
+	n     int
+	since time.Time
+}
+
+// Wrong passwords: after maxFails from one address within failWindow, that
+// address is refused until the window passes. The desk itself (loopback) is
+// never refused, so its own host can't be locked out.
+const (
+	maxFails   = 10
+	failWindow = 10 * time.Minute
+)
+
+func clientAddr(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
+func (a *authority) blocked(addr string) bool {
+	if ip := net.ParseIP(addr); ip != nil && ip.IsLoopback() {
+		return false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	f := a.fails[addr]
+	if f == nil || time.Since(f.since) > failWindow {
+		return false
+	}
+	return f.n >= maxFails
+}
+
+func (a *authority) failed(addr string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	f := a.fails[addr]
+	if f == nil || time.Since(f.since) > failWindow {
+		if len(a.fails) > 10000 { // bounded: forget everyone rather than grow forever
+			a.fails = map[string]*failCount{}
+		}
+		f = &failCount{since: time.Now()}
+		a.fails[addr] = f
+	}
+	f.n++
+	if f.n == maxFails {
+		log.Printf("auth: %d wrong passwords from %s; refusing it for %v", maxFails, addr, failWindow)
+	}
+}
+
+// checkCredsFrom checks a password from a client, counting failures.
+func (a *authority) checkCredsFrom(r *http.Request, u, p string) (ok, limited bool) {
+	addr := clientAddr(r)
+	if a.blocked(addr) {
+		return false, true
+	}
+	if a.checkCreds(u, p) {
+		return true, false
+	}
+	a.failed(addr)
+	return false, false
 }
 
 const tokenTTL = 12 * time.Hour
@@ -396,7 +468,7 @@ const tokenTTL = 12 * time.Hour
 func newAuthority(user, pass string) *authority {
 	secret := make([]byte, 32)
 	rand.Read(secret)
-	return &authority{user: user, pass: pass, secret: secret}
+	return &authority{user: user, pass: pass, secret: secret, fails: map[string]*failCount{}}
 }
 
 func (a *authority) checkCreds(u, p string) bool {
@@ -441,7 +513,8 @@ func (a *authority) ok(r *http.Request) bool {
 			return a.validToken(strings.TrimPrefix(h, "Bearer "))
 		}
 		if u, p, isBasic := r.BasicAuth(); isBasic {
-			return a.checkCreds(u, p)
+			ok, _ := a.checkCredsFrom(r, u, p)
+			return ok
 		}
 	}
 	if t := r.URL.Query().Get("token"); t != "" {

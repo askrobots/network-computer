@@ -2,7 +2,7 @@
 Type=Application
 Name=Talk
 Comment=The object server voice page
-Exec=nc-webapp "Talk" http://localhost:8009/open?next=/talk audio-input-microphone
+Exec=nc-object-open "Talk" /talk audio-input-microphone
 Icon=audio-input-microphone
 StartupWMClass=nc-talk
 Categories=Network;Office;
