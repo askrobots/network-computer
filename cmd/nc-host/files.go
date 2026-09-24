@@ -20,9 +20,11 @@ import (
 	"github.com/pion/webrtc/v4"
 )
 
-// File transfer, both ways. Each file travels on its own reliable data
-// channel labelled "file": a JSON header {"name","size"}, binary pieces, then
-// the text "end". The receiver answers "ok <name>" or "error: <why>".
+// File transfer, both ways, on reliable data channels labelled "file": a
+// JSON header {"name","size"}, binary pieces, then the text "end"; the
+// receiver answers "ok <name>" or "error: <why>". A channel may carry several
+// files one after another (the Flutter app opens one up front: channels it
+// creates later never report open there); the browser opens one per file.
 //   - client to desk: saved into -files-dir (the desk user's Desktop) under a
 //     temporary name until complete, owned by that directory's owner.
 //   - desk to client: nc-send (the file manager's "Send to my device") PUTs
@@ -39,7 +41,7 @@ type fileHeader struct {
 	Size int64  `json:"size"`
 }
 
-// receiveFile saves one file sent by the client.
+// receiveFile saves the files a client sends on one channel, one at a time.
 func receiveFile(peer string, dc *webrtc.DataChannel, dir string) {
 	var (
 		mu         sync.Mutex
@@ -47,7 +49,6 @@ func receiveFile(peer string, dc *webrtc.DataChannel, dir string) {
 		f          *os.File
 		tmp, final string
 		got        int64
-		done       bool
 	)
 	finish := func(reply string) { // with mu held
 		if f != nil {
@@ -55,7 +56,6 @@ func receiveFile(peer string, dc *webrtc.DataChannel, dir string) {
 			os.Remove(tmp)
 			f = nil
 		}
-		done = true
 		dc.SendText(reply)
 		if strings.HasPrefix(reply, "error") {
 			log.Printf("[%s] file %q: %s", peer, hdr.Name, reply)
@@ -65,8 +65,12 @@ func receiveFile(peer string, dc *webrtc.DataChannel, dir string) {
 		mu.Lock()
 		defer mu.Unlock()
 		switch {
-		case done:
+		case f == nil && !m.IsString:
+			// pieces of a file already refused or finished: drop them
+		case f == nil && m.IsString && string(m.Data) == "end":
+			// the end of a refused file: already answered
 		case f == nil && m.IsString:
+			hdr, got = fileHeader{}, 0
 			if err := json.Unmarshal(m.Data, &hdr); err != nil || hdr.Size < 0 {
 				finish("error: bad header")
 				return
