@@ -154,8 +154,8 @@ So local works on 4 cores but is slower than the cloud; on the 2-vCPU size expec
 twice these times. Keeping the model loaded (whisper.cpp's server mode) would save part
 of the load time. The clip was clean synthetic speech; real voices in a room are harder,
 tiny most of all. Plan: keep OpenAI as the default, offer base.en on 4+ cores as a
-privacy option (the voice never leaves the desk). The benchmark script is in the git
-history of this note; whisper.cpp is in /opt/whisper.cpp on the test desk.
+privacy option (the voice never leaves the desk). The benchmark is tools/whisper-bench.sh;
+whisper.cpp is in /opt/whisper.cpp on the test desk.
 
 Next: local speech to text as that option, a wake word,
 reading the screen, the clipboard and files as context, and the object server's own
