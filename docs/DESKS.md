@@ -237,3 +237,32 @@ the time the last device left), and the dashboard shows it. The decision and the
 `down` run on the Mac, because the DigitalOcean token never goes on the desk: a desk
 that could delete droplets would be too much power in one place. A device left
 connected counts as in use; the log is `~/Library/Logs/nc-autostop.log`.
+
+
+## Desks for other people (2026-09-23)
+
+`infra/people.sh` gives someone their own desk, set up for them:
+
+```sh
+infra/people.sh new alice       # writes infra/people/alice.env from the template: edit it
+infra/people.sh up alice        # volume, machine, DNS (alice.<your domain>), provisioning, their things
+infra/people.sh welcome alice   # the message to send: address, login, PIN, how to connect
+infra/people.sh list            # everyone, and whose machine is up
+infra/people.sh health all      # restart anything stopped; power on a machine that is off
+infra/people.sh update all      # everyone to the latest version
+infra/people.sh alice down      # any droplet.sh command, for one person (their desk is kept)
+```
+
+A profile says who they are (login, name, time zone, keyboard), the machine (size,
+region, desk volume size) and their things: extra apps, a voice style ("brief and
+friendly, call me Alice"), their own API keys (optional), and whether to keep it
+running. It is gitignored and mode 600, because it can hold keys.
+
+Personal settings are copied to the machine as a file (never on a command line, where
+other processes could read keys) and deleted after provisioning. They apply on the
+first run and never over the person's own later changes: keys are added only if
+missing, the voice style only if they have none, the welcome note on their Desktop
+only once.
+
+Each person gets their own machine, desk volume, rendezvous password, PIN, object
+server and keys: nothing is shared between desks.

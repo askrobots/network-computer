@@ -48,6 +48,9 @@ and files. See [docs/PLAN.md](docs/PLAN.md) for the design,
   your settings, documents, keys and pairing; destroy the computer to stop paying, bring
   up another (any size) later, and sit down where you left off. See
   [docs/DESKS.md](docs/DESKS.md).
+- **Desks for other people:** `infra/people.sh new alice` then `up alice` builds someone
+  their own desk with their time zone, apps, voice style and keys, and `welcome alice`
+  prints the message to send them. See [docs/DESKS.md](docs/DESKS.md).
 - **One-command desk on DigitalOcean:** `infra/droplet.sh up` builds a provisioned
   Ubuntu desktop (Xfce, Firefox, VLC, Audacity, the tools above) with its DNS name,
   checked by 59 automated checks; `infra/droplet.sh down` destroys it and keeps the desk.
