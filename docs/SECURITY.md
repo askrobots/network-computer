@@ -87,3 +87,65 @@ the QR-pairing idea from the original plan.
    response carries a fresh `<expiry>:<id>` username with an HMAC password under a
    secret only the rendezvous holds (`-turn-secret` / `NC_TURN_SECRET`, random if
    unset). Verified by forcing a relayed session.
+
+## Review of the desk (2026-09-23)
+
+A pass over everything a desk now runs, after voice, the computer controller and
+the object server were added. For each part: what it can do, who can reach it, what
+stands in the way.
+
+### From the internet
+
+| Part | Reachable by | Protection |
+|---|---|---|
+| Rendezvous (443, 80 for certificates) | anyone | Let's Encrypt TLS; a 16-character random password exchanged for a 12-hour HMAC token; **10 wrong passwords from one address in 10 minutes and that address is refused for the rest of the window** (loopback exempt, so the desk's own host can't be locked out) |
+| TURN relay (UDP 3478, 49152-65535) | anyone | relay credentials minted per `/config` request, expire in 12 hours |
+| A host | clients that got through the rendezvous | the host PIN once, then a signed pairing token |
+| SSH (22) | anyone | keys only (password login off) |
+| 8765 | nobody when a domain is set | the firewall closes it; the rendezvous listens there on loopback only |
+
+avahi and cups are disabled (nothing on a desk needs them); `verify.sh` checks that
+only the intended ports are public.
+
+### On the desk
+
+The desk user (`dan` here) has no sudo. Everything below runs as that user or as root.
+
+| Part | What it can do | Who can use it | Protection |
+|---|---|---|---|
+| `/run/nc-host/send.sock` | push files to connected devices; relay voice on/off and voice events | the desk user | root-owned, group = the desk user, mode 0660 (was 0666: any account) |
+| Object server (127.0.0.1:8001) | the user's records, files, AI keys, notes, tasks | sessions; the admin token | loopback only; data 0700 as the desk user; admin token root-only (0600) |
+| Sign-in helper (localhost:8009) | a signed-in object server session in the desk's browser | anyone with a one-time code | a code (60 s, single use) is needed; codes come only from `/run/nc-voice/helper.sock` (0600, the desk user); the Host header must be localhost (no DNS rebinding); `next` must be a local path. Record search moved to the socket too. Before: any local process could get a session. |
+| `nc-voice` | everything the controller can do, driven by an AI | the client's 🎙️ | see below |
+| `nc-desk` (controller) | windows, mouse, keys, files in the home folder | the desk user | files only inside home, never overwriting, trash undoable, **hidden files and folders refused** (`~/.ssh`, `~/.config`...) |
+
+### Voice: the AI is not the only gate
+
+- Only the user gives instructions. Text from web pages (`read_page`), files, records
+  and screenshots is data; the AI is told so, and to report such text instead of obeying it.
+- Three levels: safe actions run; click, drag, type and keys get a second model's review
+  (it sees the user's words, the focused window, and exactly what is about to happen);
+  trash, opening anything that would run a program (`.desktop`, scripts, executables),
+  and whatever the reviewer is unsure of are asked out loud; no answer means no.
+- The reviewer is told that typing or pressing Return in a terminal runs commands.
+  Tested: typing `rm -rf ~/Documents` into a terminal when the user only asked what was
+  in a folder was refused; `ls` when asked for was allowed.
+- No blind clicks: a click needs a screenshot from the same request.
+- Everything voice does is logged in the object server (`source: voice`).
+
+### Clients
+
+- The phone and desktop app keeps the rendezvous password and pairing tokens in the
+  keychain (iOS keychain, macOS login keychain), moved from plain preferences.
+- The web page keeps them in the browser's local storage, like a saved password; the
+  page is served by the rendezvous itself (no third-party scripts).
+
+### Accepted, for now
+
+- Any process running as the desk user can do what that user can: read the object
+  server's data and keys (it runs as that user), use the helper socket, drive the
+  desktop. The line is between accounts, not between programs of one user.
+- `nc-voice` holds the object server admin token in its environment; the desk user can
+  read it. The object server runs as that same user, so it adds no reach.
+- The object server's tasks auto-approve after 48 hours; voice doesn't use them for
+  approvals for that reason.

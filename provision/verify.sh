@@ -59,9 +59,14 @@ echo "desktop polish"
 check "cloud config drive hidden from the desktop" sh -c 'd=$(blkid -L config-2) || exit 0; udevadm info --query=property --name="$d" | grep -qx UDISKS_IGNORE=1'
 check "mousepad word wrap on"            sh -c '[ "$(gsettings get org.xfce.mousepad.preferences.view word-wrap)" = true ]'
 
+set -a; . /etc/nc/env 2>/dev/null; set +a   # NC_DOMAIN decides the firewall check
 echo "network"
 check "IPv6 disabled (no route here)"    sh -c '[ "$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6)" = 1 ]'
-check "firewall allows 8765/tcp"         sh -c 'ufw status | grep -q "8765/tcp"'
+if [ -n "$NC_DOMAIN" ]; then   # https on 443; 8765 is loopback only
+  check "firewall closes 8765/tcp (domain)" sh -c '! ufw status | grep -q "8765/tcp"'
+else
+  check "firewall allows 8765/tcp"         sh -c 'ufw status | grep -q "8765/tcp"'
+fi
 check "firewall allows 3478/udp"         sh -c 'ufw status | grep -q "3478/udp"'
 
 echo "network computer"
