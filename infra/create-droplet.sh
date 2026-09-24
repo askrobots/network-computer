@@ -54,4 +54,4 @@ echo "waiting for ssh..."
 for i in $(seq 1 30); do ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 root@"$IP" true 2>/dev/null && break; sleep 5; done
 
 PRICE=$(doctl compute size list --format Slug,PriceHourly --no-header | awk -v s="$SIZE" '$1==s{print $2}')
-NC_DESK_ENV=$ENVF NC_DOMAIN=$NC_DOMAIN NC_DESK_USER=${NC_DESK_USER:-user} NC_SIZE=$SIZE NC_PRICE_HOURLY=$PRICE sh "$DIR/provision-host.sh" "$IP" "$NAME"
+NC_DESK_ENV=$ENVF NC_DOMAIN=$NC_DOMAIN NC_KEYBOARD=$NC_KEYBOARD NC_DESK_USER=${NC_DESK_USER:-user} NC_SIZE=$SIZE NC_PRICE_HOURLY=$PRICE sh "$DIR/provision-host.sh" "$IP" "$NAME"

@@ -53,7 +53,8 @@ envset() {  # envset KEY VALUE
   if grep -q "^$1=" /etc/nc/env 2>/dev/null; then sed -i --follow-symlinks "s|^$1=.*|$1=$2|" /etc/nc/env
   else echo "$1=$2" >> /etc/nc/env; fi
 }
-envget() { sed -n "s/^$1=//p" /etc/nc/env 2>/dev/null; }
+# nothing yet on a brand-new desk (the file is created below): empty, not an error
+envget() { if [ -f /etc/nc/env ]; then sed -n "s/^$1=//p" /etc/nc/env; fi; }
 
 # Host name: explicit NC_HOST_NAME, else what this box already recorded, else a
 # default. Recording it means a later re-provision can never rename the host

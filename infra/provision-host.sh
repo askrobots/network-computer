@@ -29,7 +29,7 @@ if [ -n "$NC_DESK_ENV" ] && [ -f "$NC_DESK_ENV" ]; then
   ssh "$USER@$IP" "${PFX}chmod 600 /root/provision/person.env"
 fi
 # NC_SIZE and NC_PRICE_HOURLY (optional) only label the desktop dashboard
-ssh "$USER@$IP" "NC_PUBLIC_IP=$IP NC_HOST_NAME=$NAME NC_DOMAIN=$NC_DOMAIN NC_DESK_USER=$NC_DESK_USER NC_SIZE=$NC_SIZE NC_PRICE_HOURLY=$NC_PRICE_HOURLY ${PFX}sh /root/provision/apply.sh"
+ssh "$USER@$IP" "NC_PUBLIC_IP=$IP NC_HOST_NAME=$NAME NC_DOMAIN=$NC_DOMAIN NC_DESK_USER=$NC_DESK_USER NC_KEYBOARD=$NC_KEYBOARD NC_SIZE=$NC_SIZE NC_PRICE_HOURLY=$NC_PRICE_HOURLY ${PFX}sh /root/provision/apply.sh"
 echo
 if [ -n "$NC_DOMAIN" ]; then URL="https://$NC_DOMAIN"; else URL="http://$IP:8765"; fi
 echo "done. rendezvous: $URL   secrets: ssh $USER@$IP ${PFX}cat /etc/nc/env"

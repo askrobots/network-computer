@@ -25,14 +25,26 @@ xfconf-query -c xfce4-notifyd -p /notify-location -n -t int -s 3 2>/dev/null || 
 # a plain background, once: it streams far cheaper than a detailed picture, and the
 # dashboard sits on it (the user can pick any wallpaper afterwards)
 if [ ! -e "$HOME/.config/nc/plain-background" ]; then
-  for p in $(xfconf-query -c xfce4-desktop -l | grep '/workspace[0-9]*/image-style$'); do
-    xfconf-query -c xfce4-desktop -p "$p" -s 0                                  # no image
-    xfconf-query -c xfce4-desktop -p "${p%image-style}color-style" -s 0 2>/dev/null   # solid color
-    xfconf-query -c xfce4-desktop -p "${p%image-style}rgba1" -n -t double -s 0.075 -t double -s 0.09 \
+  props=$(xfconf-query -c xfce4-desktop -l 2>/dev/null | grep '/workspace[0-9]*/image-style$')
+  if [ -z "$props" ]; then   # a brand-new desktop has written none yet: name them from the screen
+    for mon in $(xrandr --listmonitors 2>/dev/null | awk 'NR>1{print $NF}'); do
+      for ws in 0 1 2 3; do props="$props /backdrop/screen0/monitor$mon/workspace$ws/image-style"; done
+    done
+  fi
+  set_ok=""
+  for p in $props; do
+    b=${p%image-style}
+    xfconf-query -c xfce4-desktop -p "${b}image-style" -n -t int -s 0 2>/dev/null ||
+      xfconf-query -c xfce4-desktop -p "${b}image-style" -s 0 || continue           # no image
+    xfconf-query -c xfce4-desktop -p "${b}color-style" -n -t int -s 0 2>/dev/null ||
+      xfconf-query -c xfce4-desktop -p "${b}color-style" -s 0                        # solid color
+    xfconf-query -c xfce4-desktop -p "${b}rgba1" -n -t double -s 0.075 -t double -s 0.09 \
       -t double -s 0.125 -t double -s 1 2>/dev/null ||
-    xfconf-query -c xfce4-desktop -p "${p%image-style}rgba1" -t double -s 0.075 -t double -s 0.09 \
+    xfconf-query -c xfce4-desktop -p "${b}rgba1" -t double -s 0.075 -t double -s 0.09 \
       -t double -s 0.125 -t double -s 1
+    set_ok=1
   done
-  mkdir -p "$HOME/.config/nc" && touch "$HOME/.config/nc/plain-background"
+  # done only once it worked: a first login may come before the desktop is ready
+  [ -z "$set_ok" ] || { mkdir -p "$HOME/.config/nc" && touch "$HOME/.config/nc/plain-background"; }
 fi
 pgrep -u "$(id -u)" -x conky >/dev/null || (setsid nc-dashboard >/dev/null 2>&1 &)
