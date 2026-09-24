@@ -139,7 +139,25 @@ made: 0.4–0.7 s to first sound, against 0.9–2.7 s for OpenAI's speech. Time 
 answers: 2–3 s, down from 3–5 s. A soft chime says it heard you; the end-of-speech pause
 is 0.7 s; actions run while it speaks, with a few words ("Opening Firefox.").
 
-Next: local speech to text (whisper.cpp) to cut the remaining network trip, a wake word,
+Local speech to text, measured (2026-09-23, whisper.cpp built on the desk, 4 vCPU
+s-4vcpu-8gb, CPU only, 4 threads, a 4.2 s spoken command, time includes loading the
+model each run):
+
+| Model | Time | Transcript |
+|---|---|---|
+| tiny.en | 1.7 s | exact |
+| base.en | 2.8 s | exact |
+| small.en | 9.0 s | exact |
+| OpenAI (in use) | 0.5-1.2 s | |
+
+So local works on 4 cores but is slower than the cloud; on the 2-vCPU size expect about
+twice these times. Keeping the model loaded (whisper.cpp's server mode) would save part
+of the load time. The clip was clean synthetic speech; real voices in a room are harder,
+tiny most of all. Plan: keep OpenAI as the default, offer base.en on 4+ cores as a
+privacy option (the voice never leaves the desk). The benchmark script is in the git
+history of this note; whisper.cpp is in /opt/whisper.cpp on the test desk.
+
+Next: local speech to text as that option, a wake word,
 reading the screen, the clipboard and files as context, and the object server's own
 records and tools.
 
