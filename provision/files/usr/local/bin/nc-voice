@@ -381,6 +381,23 @@ def act(a, scale=None):
         OBJ_FOR_ACTIONS.set_pref("voice_style", text)
         STYLE_CACHE["at"] = 0
         return "updated how I talk" if text else "back to my default way of talking"
+    if kind == "remind":
+        at = parse_when(a.get("at", ""))
+        text = a.get("text", "").strip()[:300]
+        if not text:
+            raise RuntimeError("remind: what about?")
+        rs = reminders()
+        rs.append({"id": os.urandom(4).hex(), "at": at.strftime("%Y-%m-%d %H:%M"), "text": text})
+        save_reminders(rs)
+        return f"reminder set for {at.strftime('%a %H:%M')}: {text}"
+    if kind == "cancel_reminder":
+        q = a.get("text", "").lower()
+        rs = reminders()
+        keep = [r for r in rs if q not in r["text"].lower()]
+        if len(keep) == len(rs):
+            raise RuntimeError(f"no reminder like {a.get('text')!r}")
+        save_reminders(keep)
+        return f"cancelled {len(rs) - len(keep)} reminder(s)"
     if kind == "note":
         data, _ = OBJ_FOR_ACTIONS.call("/collections/notes/records",
                                        json.dumps({"content": a.get("text", "")}).encode(), "application/json")
@@ -455,6 +472,9 @@ Actions, done in order:
                    (cheaper than a screenshot for reading or summarizing a page)
   {"do": "find", "query": "..."}   search the user's own records (notes, tasks...)
   {"do": "note", "text": "..."}   save a note in their object server ("take a note...")
+  {"do": "remind", "at": "YYYY-MM-DD HH:MM", "text": "..."}   a reminder, in the desk's
+                   local time (the time in each message); spoken and shown when due
+  {"do": "cancel_reminder", "text": "<part of its text>"}
   {"do": "set_style", "text": "..."}   when they tell you how to talk ("be more brief",
                    "less cheerful", "call me Dan"): the COMPLETE new style, keeping their
                    earlier wishes unless they change them; "" resets to the default
@@ -482,6 +502,59 @@ coordinates are in these pixels). Answer or act from it. Look again only after a
 that change the screen.]"""
 
 
+# ---------- reminders (object server pref voice_reminders: a JSON list) ----------
+
+def reminders():
+    try:
+        v = json.loads(OBJ_FOR_ACTIONS.pref("voice_reminders") or "[]")
+        return v if isinstance(v, list) else []
+    except (ValueError, AttributeError):
+        return []
+
+
+def save_reminders(rs):
+    OBJ_FOR_ACTIONS.set_pref("voice_reminders", json.dumps(rs))
+
+
+def parse_when(s):
+    import datetime
+    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return datetime.datetime.strptime(s.strip(), fmt)
+        except ValueError:
+            pass
+    raise RuntimeError(f"remind: can't read the time {s!r}")
+
+
+def reminder_loop(voice):
+    """Every 20 s: say, show and notify reminders that are due, then drop them."""
+    import datetime
+    while True:
+        time.sleep(20)
+        try:
+            time.tzset()
+            rs = reminders()
+            now = datetime.datetime.now()
+            due = [r for r in rs if parse_when(r["at"]) <= now]
+            if not due:
+                continue
+            save_reminders([r for r in rs if r not in due])
+            for r in due:
+                msg = f"Reminder: {r['text']}"
+                event("said", msg)
+                subprocess.run(["nc-as-user", "notify-send", "-a", "Reminder", "-i", "alarm-symbolic",
+                                "Reminder", r["text"]], capture_output=True, timeout=10)
+                try:   # the object server's bell too, so it is there later
+                    OBJ_FOR_ACTIONS.call("/collections/notifications/records", json.dumps(
+                        {"user_id": USER, "kind": "reminder", "body": r["text"], "is_read": False}).encode(),
+                        "application/json", timeout=10)
+                except Exception as e:
+                    log(f"reminder notification: {e}")
+                voice.speak(msg)
+        except Exception as e:
+            log(f"reminders: {e}")
+
+
 STYLE_CACHE = {"at": 0, "text": ""}
 
 
@@ -499,8 +572,12 @@ def style():
 
 def context():
     """What changes between turns, kept small: it rides on every message."""
+    time.tzset()   # the desk's zone follows the client's (set at connect)
+    rs = reminders()
+    pending = "; ".join(f"{r['at']} {r['text']}" for r in rs[:8])
     return (f"[Desktop right now: open windows {json.dumps(open_windows())}; "
-            f"time {time.strftime('%A %Y-%m-%d %H:%M')}]")
+            f"time {time.strftime('%A %Y-%m-%d %H:%M %Z')}"
+            + (f"; reminders: {pending}" if pending else "") + "]")
 
 
 def parse_reply(reply):
@@ -523,7 +600,8 @@ def parse_reply(reply):
 # which sees the user's words and exactly what is about to happen. Trash, and
 # anything the reviewer is unsure of, is asked of the user out loud.
 SAFE = {"open_app", "switch", "close", "arrange", "open", "search", "look", "ls", "mkdir",
-        "move", "copy", "scroll", "read_page", "find", "note", "set_style"}
+        "move", "copy", "scroll", "read_page", "find", "note", "set_style", "remind",
+        "cancel_reminder"}
 REVIEW = {"click", "drag", "type", "keys"}
 ASK = {"trash"}
 REVIEW_MODEL = os.environ.get("NC_VOICE_REVIEW_MODEL", "anthropic:claude-haiku-4-5")
@@ -1044,6 +1122,7 @@ def main():
     global SEARCHER
     SEARCHER = v.obj
     threading.Thread(target=notifications, args=(v.obj,), daemon=True).start()
+    threading.Thread(target=reminder_loop, args=(v,), daemon=True).start()
     while True:   # follow nc-host's command stream; reconnect when it restarts
         try:
             c = UnixHTTP(SOCK)

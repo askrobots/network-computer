@@ -335,6 +335,9 @@ func (h *host) handleOffer(ctx context.Context, m proto.Message) {
 			case "launch":
 				go launch()
 				return
+			case "tz":
+				go setTimezone(ev.Text)
+				return
 			case "voice":
 				if !h.voice.command(ev.On, ev.Once) {
 					b, _ := json.Marshal(proto.InputEvent{T: "voice", Kind: "error", Text: "voice is not running on this desk"})

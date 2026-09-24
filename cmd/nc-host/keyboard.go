@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"os"
 	"os/exec"
 	"regexp"
 	"runtime"
@@ -41,6 +42,30 @@ func runInputHook() {
 	if out, err := exec.Command(p).CombinedOutput(); err != nil {
 		log.Printf("input hook: %v %s", err, strings.TrimSpace(string(out)))
 	}
+}
+
+var tzRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+){0,2}$`)
+
+// setTimezone makes the desk's clock the client's: the taskbar clock, the
+// dashboard, and what voice takes "at 3" to mean. Linux desks only.
+func setTimezone(tz string) {
+	if runtime.GOOS != "linux" || !tzRe.MatchString(tz) || strings.Contains(tz, "..") {
+		return
+	}
+	if _, err := os.Stat("/usr/share/zoneinfo/" + tz); err != nil {
+		log.Printf("timezone: unknown %q", tz)
+		return
+	}
+	if cur, _ := os.Readlink("/etc/localtime"); strings.HasSuffix(cur, "/"+tz) {
+		return
+	}
+	if out, err := exec.Command("timedatectl", "set-timezone", tz).CombinedOutput(); err != nil {
+		log.Printf("timezone: %v %s", err, strings.TrimSpace(string(out)))
+		return
+	}
+	log.Printf("timezone: %s (from the client)", tz)
+	// the taskbar clock reads the zone when it starts
+	exec.Command("nc-as-user", "xfce4-panel", "-r").Start()
 }
 
 // launch opens (or closes) the desk's search and launch bar, for the client's

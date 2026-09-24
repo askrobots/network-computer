@@ -401,7 +401,8 @@ async function openPeer(){
   ctl=pc.createDataChannel('control');
   ctl.onmessage=onCtl;
   pc.ondatachannel=e=>{ if(e.channel.label==='file') receiveFile(e.channel); };
-  ctl.onopen=()=>{ lastDisplay=null; sendDisplay(); sendKeyboard(false); voiceShow(false); };
+  ctl.onopen=()=>{ lastDisplay=null; sendDisplay(); sendKeyboard(false); voiceShow(false);
+    try{ ctl.send(JSON.stringify({t:'tz',text:Intl.DateTimeFormat().resolvedOptions().timeZone})); }catch(e){} };
 
   pc.ontrack=ev=>{
     stream.addTrack(ev.track);
