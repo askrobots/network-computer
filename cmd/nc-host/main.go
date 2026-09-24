@@ -14,6 +14,7 @@ import (
 	"math/big"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -41,6 +42,8 @@ type host struct {
 	pairs               *pairing
 	display             displayControl
 	filesDir            string
+	idleFile            string    // "busy N" or "idle-since UNIX", for auto-stop (next to the send socket)
+	idleSince           time.Time // when the last client left
 	voice               voiceRelay
 	injOnce             sync.Once
 	inj                 input.Injector
@@ -87,7 +90,10 @@ func main() {
 	h := &host{name: *name, audio: *audio, mic: *mic, dryRun: *dryRun, sessions: map[string]*session{}, user: *user, password: *password, pin: *pin, filesDir: *filesDir}
 	if *sendSocket != "" {
 		go h.serveSend(*sendSocket)
+		h.idleFile = filepath.Join(filepath.Dir(*sendSocket), "idle")
 	}
+	h.idleSince = time.Now()
+	h.writeIdle()
 	h.httpc = tlspin.Client(*tlsFP)
 	pairs, err := loadPairing(*name, *stateDir, *resetPairs)
 	if err != nil {
@@ -242,6 +248,7 @@ func (h *host) handleOffer(ctx context.Context, m proto.Message) {
 		if nobody {
 			h.voice.command(false, false) // no one to listen to
 		}
+		h.writeIdle()
 	}
 
 	video, err := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264}, "video", "nc")
@@ -382,6 +389,7 @@ func (h *host) handleOffer(ctx context.Context, m proto.Message) {
 		switch st {
 		case webrtc.PeerConnectionStateConnected:
 			go logSelectedPair(peer, pc)
+			h.writeIdle()
 			for _, c := range vsender.GetParameters().Codecs { // what the client agreed to decode
 				log.Printf("[%s] video codec: %s %s (pt %d)", peer, c.MimeType, c.SDPFmtpLine, c.PayloadType)
 			}
@@ -487,4 +495,30 @@ func (h *host) injector() input.Injector {
 		runInputHook()
 	})
 	return h.inj
+}
+
+// writeIdle records whether anyone is connected, and since when nobody is:
+// the Mac's auto-stop (infra/droplet.sh autostop) reads it over ssh.
+func (h *host) writeIdle() {
+	if h.idleFile == "" {
+		return
+	}
+	h.mu.Lock()
+	n := 0
+	for _, s := range h.sessions {
+		if s.pc.ConnectionState() == webrtc.PeerConnectionStateConnected {
+			n++
+		}
+	}
+	if n > 0 {
+		h.idleSince = time.Time{}
+	} else if h.idleSince.IsZero() {
+		h.idleSince = time.Now()
+	}
+	line := fmt.Sprintf("busy %d\n", n)
+	if n == 0 {
+		line = fmt.Sprintf("idle-since %d\n", h.idleSince.Unix())
+	}
+	h.mu.Unlock()
+	os.WriteFile(h.idleFile, []byte(line), 0o644)
 }

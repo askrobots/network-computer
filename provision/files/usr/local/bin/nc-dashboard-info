@@ -18,6 +18,12 @@ if [ -n "$NC_PRICE_HOURLY" ]; then
     printf "cost     $$%.3f/h   $$%.2f/day   $$%.0f/month max\n", p, p*24, p*672
     printf "spent    $$%.2f since this boot (%.1f h)\n", p*u/3600, u/3600 }'
 fi
+S=$(cat /run/nc-host/idle 2>/dev/null); A=$(cat /etc/nc/autostop 2>/dev/null)
+case "$S" in
+  busy*)       echo "use      ${S#busy } device(s) connected" ;;
+  idle-since*) M=$(( ($(date +%s) - ${S#idle-since }) / 60 ))
+               echo "use      idle ${M} min${A:+   (auto-stop at ${A} min)}" ;;
+esac
 echo
 echo "\${color2}SERVICES\${color}"
 for s in host rendezvous voice object-server audio; do

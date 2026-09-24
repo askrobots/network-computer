@@ -223,3 +223,17 @@ list or board in the generative UI like tasks and notes. Then anything can ask f
    hostnames, and a "machines" package that starts and stops them (dev instance first).
 9. **Company sign-in, region-free identity** in the object server.
 10. Nearest-region selection, single-device revoke.
+
+
+## Auto-stop when idle (2026-09-23)
+
+`infra/droplet.sh autostop 60` (on the Mac that runs `doctl`) installs a launchd job that
+checks every 10 minutes and runs `infra/droplet.sh down` once nobody has been connected
+for 60 minutes. The desk volume stays, as always; `infra/droplet.sh up` brings it back.
+`infra/droplet.sh autostop off` removes the job; `infra/droplet.sh idle` shows the state.
+
+The desk only reports: nc-host writes `/run/nc-host/idle` (`busy N`, or `idle-since`
+the time the last device left), and the dashboard shows it. The decision and the
+`down` run on the Mac, because the DigitalOcean token never goes on the desk: a desk
+that could delete droplets would be too much power in one place. A device left
+connected counts as in use; the log is `~/Library/Logs/nc-autostop.log`.
