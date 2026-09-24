@@ -136,29 +136,42 @@ func receiveFile(peer string, dc *webrtc.DataChannel, dir string) {
 	})
 }
 
-// sendFile streams a file to one client and waits for its answer.
+// fileOut sends files on one channel, one at a time, and reads the answers.
+type fileOut struct {
+	dc    *webrtc.DataChannel
+	mu    sync.Mutex
+	reply chan string
+	low   chan struct{}
+}
+
+func newFileOut(dc *webrtc.DataChannel) *fileOut {
+	o := &fileOut{dc: dc, reply: make(chan string, 4), low: make(chan struct{}, 1)}
+	dc.SetBufferedAmountLowThreshold(fileHighWater / 4)
+	dc.OnBufferedAmountLow(func() {
+		select {
+		case o.low <- struct{}{}:
+		default:
+		}
+	})
+	dc.OnMessage(func(m webrtc.DataChannelMessage) {
+		select {
+		case o.reply <- string(m.Data):
+		default:
+		}
+	})
+	return o
+}
+
+// sendFile streams a file to one client on a new channel (the browser's way).
 func sendFile(ctx context.Context, pc *webrtc.PeerConnection, name string, r io.Reader, size int64) error {
 	dc, err := pc.CreateDataChannel("file", nil)
 	if err != nil {
 		return err
 	}
 	defer dc.Close()
-	opened, low := make(chan struct{}), make(chan struct{}, 1)
-	reply := make(chan string, 1)
+	opened := make(chan struct{})
 	dc.OnOpen(func() { close(opened) })
-	dc.SetBufferedAmountLowThreshold(fileHighWater / 4)
-	dc.OnBufferedAmountLow(func() {
-		select {
-		case low <- struct{}{}:
-		default:
-		}
-	})
-	dc.OnMessage(func(m webrtc.DataChannelMessage) {
-		select {
-		case reply <- string(m.Data):
-		default:
-		}
-	})
+	o := newFileOut(dc)
 	select {
 	case <-opened:
 	case <-ctx.Done():
@@ -166,6 +179,17 @@ func sendFile(ctx context.Context, pc *webrtc.PeerConnection, name string, r io.
 	case <-time.After(10 * time.Second):
 		return errors.New("the device did not open a channel")
 	}
+	return o.send(ctx, name, r, size)
+}
+
+// send streams one file and waits for the client's answer.
+func (o *fileOut) send(ctx context.Context, name string, r io.Reader, size int64) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	for len(o.reply) > 0 { // answers left from an earlier file
+		<-o.reply
+	}
+	dc := o.dc
 	b, _ := json.Marshal(fileHeader{Name: name, Size: size})
 	if err := dc.SendText(string(b)); err != nil {
 		return err
@@ -174,11 +198,11 @@ func sendFile(ctx context.Context, pc *webrtc.PeerConnection, name string, r io.
 	for {
 		for dc.BufferedAmount() > fileHighWater {
 			select {
-			case <-low:
+			case <-o.low:
 			case <-time.After(time.Second):
 			case <-ctx.Done():
 				return ctx.Err()
-			case r := <-reply: // refused before the end
+			case r := <-o.reply: // refused before the end
 				return errors.New(r)
 			}
 		}
@@ -199,7 +223,7 @@ func sendFile(ctx context.Context, pc *webrtc.PeerConnection, name string, r io.
 		return err
 	}
 	select {
-	case r := <-reply:
+	case r := <-o.reply:
 		if !strings.HasPrefix(r, "ok") {
 			return errors.New(r)
 		}
@@ -252,15 +276,15 @@ func (h *host) serveSend(path string) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		var pcs []*webrtc.PeerConnection
+		var targets []*session
 		h.mu.Lock()
 		for _, s := range h.sessions {
 			if s.pc.ConnectionState() == webrtc.PeerConnectionStateConnected {
-				pcs = append(pcs, s.pc)
+				targets = append(targets, s)
 			}
 		}
 		h.mu.Unlock()
-		if len(pcs) == 0 {
+		if len(targets) == 0 {
 			http.Error(w, "no device is connected", http.StatusServiceUnavailable)
 			return
 		}
@@ -268,11 +292,18 @@ func (h *host) serveSend(path string) {
 		defer cancel()
 		var wg sync.WaitGroup
 		var ok atomic.Int32
-		for _, pc := range pcs { // in parallel: one slow or old client must not hold up the rest
+		for _, s := range targets { // in parallel: one slow or old client must not hold up the rest
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				if err := sendFile(ctx, pc, name, io.NewSectionReader(tmp, 0, size), size); err != nil {
+				body := io.NewSectionReader(tmp, 0, size)
+				var err error
+				if s.fileIn != nil { // the app's own channel, opened at connect
+					err = s.fileIn.send(ctx, name, body, size)
+				} else {
+					err = sendFile(ctx, s.pc, name, body, size)
+				}
+				if err != nil {
 					log.Printf("send %s: %v", name, err)
 					return
 				}

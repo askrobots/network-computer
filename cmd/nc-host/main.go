@@ -54,6 +54,7 @@ type session struct {
 	pc     *webrtc.PeerConnection
 	cancel context.CancelFunc
 	ctl    *webrtc.DataChannel // the client's "control" channel, once open
+	fileIn *fileOut            // the client's "file-in" channel (the app), for files to it
 }
 
 func main() {
@@ -297,6 +298,13 @@ func (h *host) handleOffer(ctx context.Context, m proto.Message) {
 		log.Printf("[%s] data channel %q", peer, dc.Label())
 		if dc.Label() == "file" {
 			receiveFile(peer, dc, h.filesDir)
+			return
+		}
+		if dc.Label() == "file-in" { // the app receives files on a channel it opened
+			o := newFileOut(dc)
+			h.mu.Lock()
+			s.fileIn = o
+			h.mu.Unlock()
 			return
 		}
 		if dc.Label() == "control" {
