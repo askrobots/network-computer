@@ -1,0 +1,5 @@
+[Unit]
+Description=network-computer: restart any desk service that stopped
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/nc-health

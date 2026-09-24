@@ -13,7 +13,7 @@
 #   infra/droplet.sh snapshot-desk    back up the desk (volume snapshot, ~$0.06/GB-month)
 #   infra/droplet.sh off | on         power off (still billed) / on
 #   infra/droplet.sh idle             how long since the last device disconnected
-#   infra/droplet.sh autostop N|off   from this Mac: 'down' after N idle minutes (checked every 10 min)
+#   infra/droplet.sh autostop check N 'down' if idle N minutes (for the controller, object.dbbasic.com)
 # Defaults (domain, desk, user, region, size) come from the profile in NC_DESK_ENV:
 # infra/desk.env unless people.sh picked a person's (infra/people/NAME.env).
 set -e
@@ -75,39 +75,19 @@ case "$1" in
             $1=="idle-since" {printf "idle for %d min\n", (now-$2)/60; exit}
             {print "unknown"}' ;;
   autostop)
-    # The decision and the 'down' run here, on this Mac: the DigitalOcean token
-    # never goes on the desk (a desk that could delete droplets is too much power).
-    PLIST=$HOME/Library/LaunchAgents/com.dbbasic.nc-autostop.plist; LOG=$HOME/Library/Logs/nc-autostop.log
+    # 'autostop check N': run 'down' if nobody has been connected for N minutes. Meant for
+    # the controller (object.dbbasic.com), which holds the DigitalOcean token: never the
+    # desk itself, and not a Mac (it sleeps, and macOS keeps background jobs off external drives).
     case "$2" in
-      off)
-        launchctl bootout "gui/$(/usr/bin/id -u)" "$PLIST" 2>/dev/null; rm -f "$PLIST"
-        IP=$(ip); [ -z "$IP" ] || ssh -o ConnectTimeout=8 root@"$IP" 'rm -f /etc/nc/autostop' 2>/dev/null
-        echo "auto-stop off" ;;
-      check)   # run by launchd every 10 minutes
+      check)
         N=${3:?minutes}; IP=$(ip); [ -n "$IP" ] || exit 0
         S=$(ssh -o ConnectTimeout=8 -o BatchMode=yes root@"$IP" 'cat /run/nc-host/idle 2>/dev/null') || exit 0
         set -- $S
         if [ "$1" = idle-since ] && [ $(( ($(date +%s) - $2) / 60 )) -ge "$N" ]; then
-          echo "$(date '+%F %T') idle $(( ($(date +%s) - $2) / 60 )) min >= $N: down" >> "$LOG"
-          "$DIR/droplet.sh" down >> "$LOG" 2>&1
+          echo "$(date '+%F %T') $NAME idle $(( ($(date +%s) - $2) / 60 )) min >= $N: down"
+          "$DIR/droplet.sh" down
         fi ;;
-      ''|*[!0-9]*) echo "usage: droplet.sh autostop MINUTES|off"; exit 1 ;;
-      *)
-        mkdir -p "$(dirname "$PLIST")"
-        cat > "$PLIST" <<EOT
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>Label</key><string>com.dbbasic.nc-autostop</string>
-  <key>ProgramArguments</key><array><string>/bin/sh</string><string>$DIR/droplet.sh</string><string>autostop</string><string>check</string><string>$2</string></array>
-  <key>StartInterval</key><integer>600</integer>
-  <key>EnvironmentVariables</key><dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string></dict>
-  <key>StandardErrorPath</key><string>$LOG</string>
-</dict></plist>
-EOT
-        launchctl bootout "gui/$(/usr/bin/id -u)" "$PLIST" 2>/dev/null; launchctl bootstrap "gui/$(/usr/bin/id -u)" "$PLIST"
-        IP=$(ip); [ -z "$IP" ] || ssh -o ConnectTimeout=8 root@"$IP" "echo $2 > /etc/nc/autostop" 2>/dev/null
-        echo "auto-stop on: 'down' after $2 idle minutes, checked every 10 min from this Mac (log: $LOG)" ;;
+      *) echo "usage: droplet.sh autostop check MINUTES   (run by the controller; see docs/DESKS.md)"; exit 1 ;;
     esac ;;
   *) sed -n "2,14p" "$DIR/droplet.sh" ;;
 esac

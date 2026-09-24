@@ -225,19 +225,22 @@ list or board in the generative UI like tasks and notes. Then anything can ask f
 10. Nearest-region selection, single-device revoke.
 
 
-## Auto-stop when idle (2026-09-23)
+## Keeping desks running, and the controller (2026-09-23)
 
-`infra/droplet.sh autostop 60` (on the Mac that runs `doctl`) installs a launchd job that
-checks every 10 minutes and runs `infra/droplet.sh down` once nobody has been connected
-for 60 minutes. The desk volume stays, as always; `infra/droplet.sh up` brings it back.
-`infra/droplet.sh autostop off` removes the job; `infra/droplet.sh idle` shows the state.
+**Each desk keeps itself running.** `nc-health.timer` checks the desk's services every
+5 minutes and restarts any that stopped or failed; it needs no cloud token. (Tested:
+voice stopped, the check restarted it.)
 
-The desk only reports: nc-host writes `/run/nc-host/idle` (`busy N`, or `idle-since`
-the time the last device left), and the dashboard shows it. The decision and the
-`down` run on the Mac, because the DigitalOcean token never goes on the desk: a desk
-that could delete droplets would be too much power in one place. A device left
-connected counts as in use; the log is `~/Library/Logs/nc-autostop.log`.
+**Work that needs the DigitalOcean API belongs on the controller, object.dbbasic.com:**
+creating a person's desk, auto-stopping an idle one, powering one back on, health rounds.
+It is always on, already where accounts live, has a scheduler (the object daemon) and a
+place for platform-owned secrets, so the DigitalOcean token lives there: never on a desk
+(a desk that could delete droplets is too much power in one place) and not on a laptop (it
+sleeps; macOS also keeps background jobs off external drives, which broke a first try).
 
+What the controller can use today: each desk writes `/run/nc-host/idle` (`busy N` or
+`idle-since UNIX`, also on its dashboard); `infra/droplet.sh idle` and
+`infra/droplet.sh autostop check N` read it over ssh; `infra/people.sh` does the rest.
 
 ## Desks for other people (2026-09-23)
 

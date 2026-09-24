@@ -334,6 +334,7 @@ systemctl enable --now nc-xorg nc-desktop nc-audio nc-rendezvous nc-host nc-obje
 sleep 4
 systemctl is-active nc-xorg nc-desktop nc-audio nc-rendezvous nc-host nc-object-server nc-object-daemon nc-voice | paste -sd' ' -
 nc-object-bootstrap || echo "!! object server bootstrap failed"
+systemctl enable --now nc-health.timer >/dev/null 2>&1   # restarts anything that stops
 # session settings (Alt+Space...) apply at every login; apply them to the running session now
 for i in 1 2 3 4 5; do nc-session-setup >/dev/null 2>&1 && break; sleep 2; done
 echo

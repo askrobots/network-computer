@@ -1,0 +1,13 @@
+#!/bin/sh
+# Keep this desk's services running: anything stopped or failed (for example,
+# after systemd gave up restarting it) is reset and started again. Run every
+# few minutes by nc-health.timer; needs no cloud token. Logs to the journal.
+for s in nc-xorg nc-desktop nc-audio nc-rendezvous nc-host nc-object-server nc-object-daemon nc-voice; do
+  systemctl cat "$s" >/dev/null 2>&1 || continue          # not on this desk
+  systemctl is-enabled --quiet "$s" 2>/dev/null || continue
+  if ! systemctl is-active --quiet "$s"; then
+    echo "nc-health: $s was $(systemctl is-active "$s"), restarting"
+    systemctl reset-failed "$s" 2>/dev/null
+    systemctl restart "$s"
+  fi
+done

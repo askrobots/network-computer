@@ -6,6 +6,8 @@
 #   infra/people.sh list              everyone, and whose machine is up
 #   infra/people.sh health [NAME|all] check services; restart any that stopped (and power on if off)
 #   infra/people.sh update [NAME|all] bring them to the latest version (re-provision)
+#   infra/people.sh remove NAME [--delete-desk NAME]  machine down, DNS name deleted; the desk
+#                                     volume (their files) only with the name given twice
 #   infra/people.sh NAME <droplet.sh command>   anything else: status, ssh, logs, idle, down, creds...
 # Profiles are gitignored (they can hold keys). Their desk volumes are never deleted by any script.
 set -e
@@ -59,6 +61,7 @@ EOT
         printf "%-14s %-26s %-14s %s\n" "$n" "${NC_DOMAIN:-(ip only)}" "${NC_SIZE:-?}" "${m:-down (desk kept)}" )
     done ;;
   health)
+    [ -n "$(people)" ] || { echo "$(date '+%F %T') no people yet"; exit 0; }
     for n in $( [ -z "$2" ] || [ "$2" = all ] && people || echo "$2" ); do
       ( . "$(profile "$n")"
         ID=$(doctl compute droplet list --format Name,ID,Status --no-header | awk -v h="$NC_HOST_NAME" '$1==h{print $2" "$3}')
@@ -77,6 +80,29 @@ EOT
     for n in $( [ -z "$2" ] || [ "$2" = all ] && people || echo "$2" ); do
       echo "== $n"; run "$n" provision | grep -E "FAIL|ok, |!!" || true
     done ;;
-  ''|-h|--help) sed -n 2,10p "$0" ;;
+  remove)
+    N=${2:?usage: people.sh remove NAME [--delete-desk NAME]}; f=$(profile "$N")
+    ( . "$f"
+      NC_DESK_ENV=$f sh "$DIR/droplet.sh" down
+      if [ -n "$NC_DOMAIN" ]; then   # down parks the name at 127.0.0.1; a person who's gone needs none
+        ZONE=${NC_DOMAIN#*.}; REC=${NC_DOMAIN%%.*}
+        for id in $(doctl compute domain records list "$ZONE" --format ID,Type,Name --no-header | awk -v r="$REC" '$2=="A" && $3==r{print $1}'); do
+          doctl compute domain records delete "$ZONE" "$id" --force && echo "DNS $NC_DOMAIN deleted"
+        done
+      fi
+      if [ "$3" = --delete-desk ] && [ "$4" = "$N" ]; then
+        VOL=desk-${NC_DESK:-$N}
+        VID=$(doctl compute volume list --format ID,Name --no-header | awk -v v="$VOL" '$2==v{print $1}')
+        for i in 1 2 3 4 5 6; do [ -z "$VID" ] && break; doctl compute volume delete "$VID" --force 2>/dev/null && { echo "desk $VOL deleted (their files are gone)"; break; }; sleep 10; done
+        rm -f "$f"; echo "profile removed"
+      else
+        echo "desk desk-${NC_DESK:-$N} kept (their files); to delete it too: people.sh remove $N --delete-desk $N"
+      fi )
+    ;;
+  keepalive)
+    echo "Each desk keeps its own services running (nc-health, every 5 minutes)."
+    echo "Scheduled work that needs the DigitalOcean API (power on, auto-stop, health rounds)"
+    echo "belongs on the controller (object.dbbasic.com), not this Mac: see docs/DESKS.md." ;;
+  ''|-h|--help) sed -n 2,13p "$0" ;;
   *)  run "$1" "${2:-status}" "$3" ;;
 esac
