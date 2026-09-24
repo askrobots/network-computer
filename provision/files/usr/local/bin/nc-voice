@@ -188,6 +188,21 @@ class ObjectServer:
                 self.token = None
             raise RuntimeError(f"{path.split('?')[0]}: HTTP {e.code}") from None
 
+    def pref(self, key):
+        try:
+            return self.get(f"/prefs/{key}", timeout=10).get("value", "")
+        except Exception:
+            return ""
+
+    def set_pref(self, key, value):
+        if not self.token:
+            self._open_session()
+        req = urllib.request.Request(f"{OBJ}/prefs/{key}", json.dumps({"value": value}).encode(), method="PUT",
+                                     headers={"Authorization": "Bearer " + (self.token or ""),
+                                              "Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            r.read()
+
     def read_page(self, url):
         data, _ = self.call("/api/read", json.dumps({"url": url}).encode(), "application/json", timeout=45)
         return json.loads(data)
@@ -353,6 +368,11 @@ def act(a, scale=None):
         links = " ".join(f"[{l.get('n')}] {l.get('label', '')[:40]}" for l in (r.get("links") or [])[:40])
         return (f"read {r.get('title') or a.get('url')}: {(r.get('text') or '')[:6000]}"
                 + (f" LINKS: {links}" if links else ""))
+    if kind == "set_style":
+        text = a.get("text", "").strip()[:2000]
+        OBJ_FOR_ACTIONS.set_pref("voice_style", text)
+        STYLE_CACHE["at"] = 0
+        return "updated how I talk" if text else "back to my default way of talking"
     if kind == "note":
         data, _ = OBJ_FOR_ACTIONS.call("/collections/notes/records",
                                        json.dumps({"content": a.get("text", "")}).encode(), "application/json")
@@ -427,6 +447,9 @@ Actions, done in order:
                    (cheaper than a screenshot for reading or summarizing a page)
   {"do": "find", "query": "..."}   search the user's own records (notes, tasks...)
   {"do": "note", "text": "..."}   save a note in their object server ("take a note...")
+  {"do": "set_style", "text": "..."}   when they tell you how to talk ("be more brief",
+                   "less cheerful", "call me Dan"): the COMPLETE new style, keeping their
+                   earlier wishes unless they change them; "" resets to the default
   {"do": "look"}   to get a screenshot of the screen as it is (after your other actions)
 Seeing: the window list gives only titles, never contents. To read or describe what is in
 a window, or to click something, you need a screenshot: add look. Mouse coordinates are
@@ -446,6 +469,21 @@ mistakes: guess the likely meaning."""
 WITH_SCREENSHOT = """[A screenshot of the screen right now is attached ({w}x{h} pixels; mouse
 coordinates are in these pixels). Answer or act from it. Look again only after actions
 that change the screen.]"""
+
+
+STYLE_CACHE = {"at": 0, "text": ""}
+
+
+def style():
+    """The user's own rules for how the voice talks (object server pref voice_style)."""
+    if time.monotonic() - STYLE_CACHE["at"] > 20:
+        STYLE_CACHE["text"] = OBJ_FOR_ACTIONS.pref("voice_style") if OBJ_FOR_ACTIONS else ""
+        STYLE_CACHE["at"] = time.monotonic()
+    t = STYLE_CACHE["text"].strip()
+    if not t:
+        return SYSTEM
+    return SYSTEM + "\n\nHow this user wants you to talk (follow it over the defaults above; " \
+                    "the JSON format still applies):\n" + t
 
 
 def context():
@@ -474,7 +512,7 @@ def parse_reply(reply):
 # which sees the user's words and exactly what is about to happen. Trash, and
 # anything the reviewer is unsure of, is asked of the user out loud.
 SAFE = {"open_app", "switch", "close", "arrange", "open", "search", "look", "ls", "mkdir",
-        "move", "copy", "scroll", "read_page", "find", "note"}
+        "move", "copy", "scroll", "read_page", "find", "note", "set_style"}
 REVIEW = {"click", "drag", "type", "keys"}
 ASK = {"trash"}
 REVIEW_MODEL = os.environ.get("NC_VOICE_REVIEW_MODEL", "anthropic:claude-haiku-4-5")
@@ -660,7 +698,7 @@ class Voice:
         message, attach, scale, final = text + "\n\n" + context(), None, None, ""
         for step in range(MAX_STEPS):
             try:
-                reply = self.obj.chat(message, turns, SYSTEM, attachments=attach)
+                reply = self.obj.chat(message, turns, style(), attachments=attach)
             finally:
                 if attach:
                     self.obj.delete_file(attach[0])

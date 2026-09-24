@@ -34,7 +34,7 @@ print("   keys stored for:", ", ".join(done) or "none")
 PYEOF
 fi
 
-for p in app-theme app-views app-nav app-shell app-files app-projects app-collab app-notes app-tasks app-notify; do
+for p in app-theme app-views app-nav app-shell app-files app-projects app-collab app-notes app-tasks app-notify app-settings; do
   code=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Token $DBBASIC_ADMIN_TOKEN" "http://127.0.0.1:8001/packages/$p/install")
   echo "   package $p: $code"
 done
