@@ -6,3 +6,6 @@ acme-cache/
 infra/desk.env
 __pycache__/
 *.pyc
+# people's desk profiles (they can hold their keys); the example stays
+infra/people/*.env
+!infra/people/example.env

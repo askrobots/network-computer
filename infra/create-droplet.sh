@@ -1,7 +1,8 @@
 #!/bin/sh
 # Create a computer, attach its desk, and provision it.
 # Usage: infra/create-droplet.sh [name] [region] [size]
-# Defaults come from infra/desk.env (see desk.env.example), then built-ins.
+# Defaults come from the profile in NC_DESK_ENV (default infra/desk.env; see
+# desk.env.example and people.sh), then built-ins.
 #
 # The desk is a small DigitalOcean volume (desk-$NC_DESK, $NC_DESK_GB GB) that
 # outlives the computer: settings, documents, secrets, and the desk's identity
@@ -10,7 +11,8 @@
 # hostname is pointed at the new computer before provisioning, for https.
 set -e
 DIR=$(cd "$(dirname "$0")" && pwd)
-[ -f "$DIR/desk.env" ] && . "$DIR/desk.env"
+ENVF=${NC_DESK_ENV:-$DIR/desk.env}
+[ -f "$ENVF" ] && . "$ENVF"
 NAME=${1:-${NC_HOST_NAME:-nc}}; REGION=${2:-${NC_REGION:-nyc3}}; SIZE=${3:-${NC_SIZE:-s-2vcpu-4gb}}
 DESK=${NC_DESK:-$NAME}; DESK_GB=${NC_DESK_GB:-1}; VOL=desk-$DESK
 IMAGE=ubuntu-24-04-x64
@@ -35,7 +37,7 @@ fi
 
 echo "creating $NAME ($SIZE, $REGION) with desk attached..."
 doctl compute droplet create "$NAME" --region "$REGION" --size "$SIZE" --image "$IMAGE" \
-  --ssh-keys "$KEY_ID" --tag-name nc --volumes "$VOL_ID" --wait --format ID,Name,PublicIPv4 --no-header
+  --ssh-keys "$KEY_ID" --tag-names "nc,nc-$NAME" --volumes "$VOL_ID" --wait --format ID,Name,PublicIPv4 --no-header
 
 IP=""
 for i in $(seq 1 30); do
@@ -52,4 +54,4 @@ echo "waiting for ssh..."
 for i in $(seq 1 30); do ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 root@"$IP" true 2>/dev/null && break; sleep 5; done
 
 PRICE=$(doctl compute size list --format Slug,PriceHourly --no-header | awk -v s="$SIZE" '$1==s{print $2}')
-NC_DOMAIN=$NC_DOMAIN NC_DESK_USER=${NC_DESK_USER:-user} NC_SIZE=$SIZE NC_PRICE_HOURLY=$PRICE sh "$DIR/provision-host.sh" "$IP" "$NAME"
+NC_DESK_ENV=$ENVF NC_DOMAIN=$NC_DOMAIN NC_DESK_USER=${NC_DESK_USER:-user} NC_SIZE=$SIZE NC_PRICE_HOURLY=$PRICE sh "$DIR/provision-host.sh" "$IP" "$NAME"

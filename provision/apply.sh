@@ -186,6 +186,61 @@ if ! grep -q 'nc-send' "$UCA" 2>/dev/null; then
   awk '/<\/actions>/{print "<action><icon>document-send</icon><name>Send to my device</name><submenu></submenu><unique-id>nc-send</unique-id><command>nc-send %F</command><description>Download on the device you are connected from</description><range>*</range><patterns>*</patterns><other-files/><text-files/><image-files/><audio-files/><video-files/></action>"}{print}' "$UCA" > "$UCA.new" && mv "$UCA.new" "$UCA"
   chown "$NC_DESK_USER:$NC_DESK_USER" "$UCA"
 fi
+echo ">> personal settings (from the profile; applied once, never over the user's own changes)"
+PERSON="$(dirname "$0")/person.env"
+if [ -f "$PERSON" ]; then
+  (
+    . "$PERSON"
+    if [ -n "$NC_TZ" ] && echo "$NC_TZ" | grep -Eq '^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+){0,2}$' \
+         && [ -e "/usr/share/zoneinfo/$NC_TZ" ]; then
+      timedatectl set-timezone "$NC_TZ" && echo "   time zone $NC_TZ"
+    fi
+    if [ -n "$NC_EXTRA_PACKAGES" ]; then
+      pk=$(echo "$NC_EXTRA_PACKAGES" | tr ' ,' '\n\n' | grep -E '^[a-z0-9][a-z0-9.+-]+$' | tr '\n' ' ')
+      [ -z "$pk" ] || { $APT install -y -q $pk >/dev/null && echo "   extra apps: $pk"; }
+    fi
+    SEC=/desk/secrets/env; [ -n "$DESK" ] || SEC=/etc/nc/secrets.env
+    [ -f "$SEC" ] || install -m 0600 -o "$NC_DESK_USER" -g "$NC_DESK_USER" /dev/null "$SEC"
+    for k in ANTHROPIC_API_KEY OPENAI_API_KEY; do
+      eval v=\$NC_$k
+      if [ -n "$v" ] && ! grep -q "^$k=." "$SEC"; then
+        printf '%s=%s\n' "$k" "$v" >> "$SEC" && echo "   $k added to the desk's secrets"
+      fi
+    done
+    chown "$NC_DESK_USER:$NC_DESK_USER" "$SEC"; chmod 600 "$SEC"
+    # the voice style waits for the object server (nc-object-bootstrap, below)
+    [ -z "$NC_VOICE_STYLE" ] || printf '%s' "$NC_VOICE_STYLE" > /etc/nc/voice-style.initial
+    # a welcome note on their Desktop, once
+    MARK="$UHOME/.config/nc/welcomed"
+    if [ ! -e "$MARK" ]; then
+      WHO=${NC_WELCOME_NAME:-$NC_DESK_USER}
+      runuser -u "$NC_DESK_USER" -- mkdir -p "$UHOME/Desktop" "$UHOME/.config/nc"
+      cat > "$UHOME/Desktop/Welcome.txt" <<EOT
+Welcome to your desk, $WHO.
+
+This computer lives in the cloud; your desk (settings, Documents, Desktop, keys)
+is kept even when the computer is replaced.
+
+  Search and launch          Alt+Space (or the magnifier button at the top)
+  Talk to it                 the round microphone button, bottom left:
+                             "open Firefox", "put Firefox on the left",
+                             "what's on my screen?", "remind me at 3 to...",
+                             "take a note: ...", "be more brief"
+  Copy and paste             Cmd/Ctrl+C and V work between your device and here
+  Files                      drop files on the window; right-click a file here and
+                             choose "Send to my device" to get it back
+  Your apps and notes        "Object Server" on the Desktop
+
+Connect from any browser at ${NC_DOMAIN:+https://$NC_DOMAIN}, or the Network Computer app.
+EOT
+      chown "$NC_DESK_USER:$NC_DESK_USER" "$UHOME/Desktop/Welcome.txt"
+      runuser -u "$NC_DESK_USER" -- touch "$MARK"
+      echo "   welcome note for $WHO"
+    fi
+  )
+  rm -f "$PERSON"
+fi
+
 # the desktop session runs as the desk user
 install -d /etc/systemd/system/nc-desktop.service.d
 cat > /etc/systemd/system/nc-desktop.service.d/user.conf <<EOT

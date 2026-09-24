@@ -23,6 +23,11 @@ ssh "$USER@$IP" 'mkdir -p /root/provision'
 scp -q -r "$ROOT/provision/." "$USER@$IP":/root/provision/
 # sudo only if not already root
 PFX=""; [ "$USER" = root ] || PFX="sudo "
+# the profile's personal settings (keys too) go as a file, never on a command line
+if [ -n "$NC_DESK_ENV" ] && [ -f "$NC_DESK_ENV" ]; then
+  scp -q "$NC_DESK_ENV" "$USER@$IP":/root/provision/person.env
+  ssh "$USER@$IP" "${PFX}chmod 600 /root/provision/person.env"
+fi
 # NC_SIZE and NC_PRICE_HOURLY (optional) only label the desktop dashboard
 ssh "$USER@$IP" "NC_PUBLIC_IP=$IP NC_HOST_NAME=$NAME NC_DOMAIN=$NC_DOMAIN NC_DESK_USER=$NC_DESK_USER NC_SIZE=$NC_SIZE NC_PRICE_HOURLY=$NC_PRICE_HOURLY ${PFX}sh /root/provision/apply.sh"
 echo

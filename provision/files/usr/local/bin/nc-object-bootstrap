@@ -38,3 +38,17 @@ for p in app-theme app-views app-nav app-shell app-files app-projects app-collab
   code=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Token $DBBASIC_ADMIN_TOKEN" "http://127.0.0.1:8001/packages/$p/install")
   echo "   package $p: $code"
 done
+
+# the voice style from the profile, only if the user hasn't set one
+if [ -s /etc/nc/voice-style.initial ]; then
+  T=$(curl -s -X POST -H "Authorization: Token $DBBASIC_ADMIN_TOKEN" -H "Content-Type: application/json" \
+        -d "{\"user_id\":\"$U\",\"ttl_seconds\":300,\"label\":\"bootstrap\"}" http://127.0.0.1:8001/identity/sessions |
+      "$PY" -c 'import json,sys; print(json.load(sys.stdin).get("token",""))')
+  cur=$(curl -s -H "Authorization: Bearer $T" http://127.0.0.1:8001/prefs/voice_style | "$PY" -c 'import json,sys; print(json.load(sys.stdin).get("value",""))' 2>/dev/null)
+  if [ -z "$cur" ]; then
+    "$PY" -c 'import json,sys; print(json.dumps({"value": open("/etc/nc/voice-style.initial").read()}))' |
+      curl -s -o /dev/null -X PUT -H "Authorization: Bearer $T" -H "Content-Type: application/json" --data-binary @- \
+        http://127.0.0.1:8001/prefs/voice_style && echo "   voice style set"
+  fi
+  rm -f /etc/nc/voice-style.initial
+fi

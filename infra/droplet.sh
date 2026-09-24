@@ -14,14 +14,18 @@
 #   infra/droplet.sh off | on         power off (still billed) / on
 #   infra/droplet.sh idle             how long since the last device disconnected
 #   infra/droplet.sh autostop N|off   from this Mac: 'down' after N idle minutes (checked every 10 min)
-# Defaults (domain, desk, user, region, size) come from infra/desk.env.
+# Defaults (domain, desk, user, region, size) come from the profile in NC_DESK_ENV:
+# infra/desk.env unless people.sh picked a person's (infra/people/NAME.env).
 set -e
 DIR=$(cd "$(dirname "$0")" && pwd); ROOT=$(cd "$DIR/.." && pwd)
-[ -f "$DIR/desk.env" ] && . "$DIR/desk.env"
+ENVF=${NC_DESK_ENV:-$DIR/desk.env}
+[ -f "$ENVF" ] && . "$ENVF"
+export NC_DESK_ENV=$ENVF
 cd "$DIR"
-# the computer: NC_DROPLET, else the droplet tagged "nc", else the host name
-NAME=${NC_DROPLET:-$(doctl compute droplet list --tag-name nc --format Name --no-header 2>/dev/null | head -1)}
-NAME=${NAME:-${NC_HOST_NAME:-nc}}
+# the computer: NC_DROPLET, else the profile's host name, else the droplet tagged "nc"
+NAME=${NC_DROPLET:-$NC_HOST_NAME}
+NAME=${NAME:-$(doctl compute droplet list --tag-name nc --format Name --no-header 2>/dev/null | head -1)}
+NAME=${NAME:-nc}
 VOL=desk-${NC_DESK:-${NC_HOST_NAME:-nc}}
 
 ip() { doctl compute droplet list --format Name,PublicIPv4 --no-header | awk -v n="$NAME" '$1==n{print $2}'; }
@@ -52,6 +56,8 @@ case "$1" in
   logs)   ssh root@"$(ip)" journalctl -f -u nc-host -u nc-rendezvous ;;
   update) ssh root@"$(ip)" 'cd /opt/network-computer && git pull -q && export PATH=$PATH:/usr/local/go/bin && go build -buildvcs=false -o /usr/local/bin/ ./cmd/... && systemctl restart nc-rendezvous nc-host && echo updated' ;;
   provision) IP=$(ip); ssh root@"$IP" 'mkdir -p /root/provision'; scp -q -r "$ROOT/provision/." root@"$IP":/root/provision/
+             # the profile's personal settings (keys too) go as a file, never on a command line
+             [ -f "$ENVF" ] && { scp -q "$ENVF" root@"$IP":/root/provision/person.env; ssh root@"$IP" 'chmod 600 /root/provision/person.env'; }
              SIZE=$(doctl compute droplet get "$(id)" -o json | grep -o '"size_slug": *"[^"]*"' | head -1 | cut -d'"' -f4)
              PRICE=$(doctl compute size list --format Slug,PriceHourly --no-header | awk -v s="$SIZE" '$1==s{print $2}')
              ssh root@"$IP" "NC_PUBLIC_IP=$IP NC_HOST_NAME=$NC_HOST_NAME NC_DOMAIN=$NC_DOMAIN NC_DESK_USER=$NC_DESK_USER NC_KEYBOARD=$NC_KEYBOARD NC_SIZE=$SIZE NC_PRICE_HOURLY=$PRICE sh /root/provision/apply.sh" ;;
