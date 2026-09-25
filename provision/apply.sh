@@ -88,12 +88,35 @@ deps() {
 snapshot() { for s in xorg desktop audio rendezvous host object-server object-daemon voice; do echo "$s $(cat $(deps $s) 2>/dev/null | md5sum | cut -c1-12)"; done; }
 BEFORE=$(snapshot)
 
+echo ">> memory: swap, so a spike slows the desk down instead of freezing it"
+# Cloud images come without swap. With 4 GB and none, running out of memory
+# did not kill anything: the kernel evicted and re-read program files until
+# ssh, the desktop and the web page all stopped answering (2026-09-25; a
+# Flutter build next to five video streams). Swap as large as the memory, at
+# most 4 GB, on the computer's own disk (not the desk volume).
+if ! swapon --show=NAME --noheadings | grep -q .; then
+  MEM=$(awk '/MemTotal/{print int($2/1024)}' /proc/meminfo); SZ=$(( MEM < 4096 ? MEM : 4096 ))
+  [ -f /swapfile ] || { fallocate -l ${SZ}M /swapfile && chmod 600 /swapfile && mkswap -q /swapfile; }
+  swapon /swapfile
+fi
+grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+# prefer keeping programs in memory over file cache, but use swap before freezing
+printf 'vm.swappiness=20\n' > /etc/sysctl.d/60-nc-memory.conf; sysctl -q -p /etc/sysctl.d/60-nc-memory.conf
+
 echo ">> packages"
 $APT update -q
 # before any install: package upgrades must never restart the desk's own
 # services (needrestart would, closing every window of the session)
 install -Dm644 files/etc/needrestart/conf.d/nc.conf /etc/needrestart/conf.d/nc.conf
 grep -vE '^\s*#|^\s*$' packages.txt | xargs $APT install -y -q
+
+echo ">> memory: earlyoom stops the biggest runaway before the desk locks up"
+# Never the desk's own services, the desktop or ssh; builds and browser tabs first.
+cat > /etc/default/earlyoom <<'EOF'
+# network-computer (provision/apply.sh): act at 5% memory and 10% swap left
+EARLYOOM_ARGS="-m 5 -s 10 -r 3600 --avoid ^(nc-host|nc-rendezvous|sshd|Xorg|xfce4-session|xfwm4|xfce4-panel|systemd|pulseaudio|ffmpeg)$ --prefer ^(dart|dartaotruntime|gen_snapshot|flutter|clang|ld|WebKitWebProces|Isolated.Web.Co|Web.Content)$"
+EOF
+systemctl enable earlyoom >/dev/null 2>&1; systemctl restart earlyoom
 
 echo ">> Firefox (real deb from Mozilla, not the snap stub)"
 install -d -m 0755 /etc/apt/keyrings

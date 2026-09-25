@@ -51,3 +51,5 @@ cups
 cups-filters
 # the connected device's camera as a webcam (v4l2loopback is in the kernel modules)
 v4l-utils
+# stop the biggest runaway process before the desk runs out of memory and freezes
+earlyoom

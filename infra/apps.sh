@@ -80,7 +80,12 @@ sed -i "s|^set(BINARY_NAME .*|set(BINARY_NAME \"$BIN\")|; s|^set(APPLICATION_ID 
 sed -i -E "s/(gtk_header_bar_set_title\(header_bar, |gtk_window_set_title\(window, )\"[^\"]*\"/\1\"$TITLE\"/" linux/runner/my_application.cc
 # the whole icon font: an incremental build kept the first build's cut-down
 # font, so icons added later drew as blanks (2026-09-25)
-runuser -u ncbuild -- sh -c 'export PATH=/opt/flutter/bin:$PATH; flutter pub get >/dev/null && flutter build linux --release --no-tree-shake-icons 2>&1 | tail -15'
+# in a box: lowest CPU priority and capped memory, so a build never starves
+# the person using the desk (one froze it, 2026-09-25); too big = it fails, not the desk
+systemd-run --quiet --wait --pipe --collect --uid=ncbuild --working-directory="$PWD" \
+  -p MemoryHigh=1400M -p MemoryMax=2G -p CPUWeight=10 -p Nice=19 -p IOWeight=10 \
+  --setenv=HOME=/var/lib/ncbuild --setenv=PATH=/opt/flutter/bin:/usr/local/bin:/usr/bin:/bin \
+  sh -c 'flutter pub get >/dev/null && flutter build linux --release --no-tree-shake-icons 2>&1 | tail -15'
 B=$S/build/linux/x64/release/bundle
 [ -x "$B/$BIN" ] || { echo "!! build produced no $BIN"; exit 1; }
 ROOT=/desk/apps; [ -d /desk/nc ] || ROOT=/opt/dbbasic
