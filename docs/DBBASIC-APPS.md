@@ -83,7 +83,19 @@ Slides' (files `.dbp`): list_slides, get_slide, add_slide (title, body with
 `- ` bullets, where), set_slide, move_slide, delete_slide (asked first),
 show_slide, mode (present/edit), open, save, save_as.
 
-Draw, Shell, Webmaster and Porter get theirs as they move onto the kit.
+Porter's: formats, convert_text, convert_file (format from the extension; the
+output next to the input, never over a file unasked).
+
+Shell's: read_output (redacted, as Shell's own AI context is), run_command
+(always asked of the user: a command can do anything), new_tab, switch_tab.
+
+Webmaster's: templates, new_site (from a template, into a new folder),
+open_site, list_pages, get_page, add_page and add_text (dictated text becomes
+heading, paragraph and list blocks), delete_page (asked), save, export (plain
+HTML into a new folder). Deploying stays a person's button: it publishes.
+
+Draw gets its actions next. The kit's web view is its own package
+(`dbbasic_editor_web_view`), so only Writer, Spreadsheet and Slides carry WebKit.
 
 ## Phone, tablet or desktop
 
