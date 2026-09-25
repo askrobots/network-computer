@@ -92,7 +92,13 @@ Shell's: read_output (redacted, as Shell's own AI context is), run_command
 Webmaster's: templates, new_site (from a template, into a new folder),
 open_site, list_pages, get_page, add_page and add_text (dictated text becomes
 heading, paragraph and list blocks), delete_page (asked), save, export (plain
-HTML into a new folder). Deploying stays a person's button: it publishes.
+HTML into a new folder), publish (asked: it goes to the object server), and
+ai_edit (paid): AI rewrites a page's words, never its structure, as one undo
+step: `site` (write the page for this site, replacing template copy), rewrite,
+shorter, friendlier, professional, spelling, or an own instruction. It never
+invents facts; it leaves [placeholders]. In the app the same is ✨ on a
+block's toolbar and AI in the top bar. It needs only an AI key: brochure
+sites need no object server.
 
 Draw's: generate_image (marked paid: it costs money), open, save, save_as,
 new_canvas, undo.
