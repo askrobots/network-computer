@@ -126,5 +126,6 @@ version on disk is kept beside it (`.versions/<file>/<date time>`, at most one e
 keeping what was there as a version too. Plain copies: readable without the app.
 
 Where it shows today: Writer (auto-save, names from the content, versions),
-Webmaster (auto-save once a site has a folder). Next: Spreadsheet, Slides, Draw, Cabinet.
+Spreadsheet (named by its title cell), Slides (by the first slide's title), Webmaster
+(auto-save once a site has a folder). Next: versions in Spreadsheet and Slides, Draw.
 
