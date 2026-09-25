@@ -120,6 +120,11 @@ dialog.
 Save, Save As and a name you choose still work: the AI's name is a suggestion
 (rule 4), never for text that looks like credentials.
 
-Where it shows today: Writer (auto-save and AI names), Webmaster (auto-save once
-a site has a folder). Next: Spreadsheet, Slides, Draw, Cabinet.
+A document that saves itself needs a way back: before a save replaces a file, the
+version on disk is kept beside it (`.versions/<file>/<date time>`, at most one every
+10 minutes, the newest 50; the kit's `Versions`), and File, Versions brings one back,
+keeping what was there as a version too. Plain copies: readable without the app.
+
+Where it shows today: Writer (auto-save, names from the content, versions),
+Webmaster (auto-save once a site has a folder). Next: Spreadsheet, Slides, Draw, Cabinet.
 
