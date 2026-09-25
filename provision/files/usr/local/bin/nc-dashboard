@@ -1,4 +1,26 @@
 #!/bin/sh
-# The desktop dashboard (started at login). One at a time.
-pkill -u "$(id -u)" -x conky 2>/dev/null
-exec conky -c /etc/nc-dashboard/conky.conf
+# The desktop dashboard (started at login): one at a time, and its layout
+# follows the screen. A phone-sized screen gets three lines, a middling one
+# six, a big one everything (/etc/nc-dashboard/{mini,compact,conky}.conf):
+# the most important first, the rest where there is room. The screen size is
+# checked every few seconds (the desk resizes to the device you connect from)
+# and conky restarted only when the layout changes. See docs/DESIGN.md.
+LOCK="${XDG_RUNTIME_DIR:-/tmp}/nc-dashboard.lock"
+exec 9>"$LOCK"
+flock -n 9 || { pkill -u "$(id -u)" -x conky; exec flock 9 "$0" "$@"; }   # one watcher
+layout() {
+  xdpyinfo 2>/dev/null | awk '/dimensions/ { split($2, d, "x"); w = d[1]; h = d[2]
+    if (h < 600 || w < 800) print "mini"; else if (h < 900 || w < 1400) print "compact"; else print "conky"; exit }'
+}
+cur=""
+while true; do
+  l=$(layout)
+  [ -n "$l" ] || l=conky
+  if [ "$l" != "$cur" ] || ! pgrep -u "$(id -u)" -x conky >/dev/null; then
+    pkill -u "$(id -u)" -x conky 2>/dev/null
+    sleep 0.3
+    conky -c "/etc/nc-dashboard/$l.conf" >/dev/null 2>&1 &
+    cur=$l
+  fi
+  sleep 3
+done

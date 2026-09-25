@@ -19,6 +19,19 @@ if [ ! -e "$L" ] && [ ! -e "$HOME/.config/nc/object-icon-placed" ]; then
   mkdir -p "$HOME/.config/nc" && touch "$HOME/.config/nc/object-icon-placed"
 fi
 
+# the dbbasic apps (nc-apps) on the desktop, so they are one double-click or
+# double-tap away: each placed once and marked trusted (no "untrusted
+# launcher" question); one you delete stays deleted; one installed later
+# appears (nc-apps install runs this)
+for f in /usr/share/applications/dbbasic-*.desktop; do
+  [ -f "$f" ] || continue
+  n=$(basename "$f" .desktop); mark="$HOME/.config/nc/placed-$n"
+  [ -e "$mark" ] && continue
+  cp "$f" "$D/$n.desktop" && chmod +x "$D/$n.desktop" &&
+    gio set -t string "$D/$n.desktop" metadata::xfce-exe-checksum "$(sha256sum "$D/$n.desktop" | cut -d' ' -f1)" 2>/dev/null
+  mkdir -p "$HOME/.config/nc" && touch "$mark"
+done
+
 # ~/Objects (the object server's files, nc-object-files): in the file manager's
 # side pane always, and on the desktop once, as a link the user may delete
 O="$HOME/Objects"; B="$HOME/.config/gtk-3.0/bookmarks"

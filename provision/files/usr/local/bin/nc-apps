@@ -63,6 +63,9 @@ update-mime-database /usr/share/mime >/dev/null 2>&1 || true
 update-desktop-database /usr/share/applications >/dev/null 2>&1 || true
 gtk-update-icon-cache -q /usr/share/icons/hicolor 2>/dev/null || true
 
+# on the desktop too, for a session that is running now (it also runs at login)
+[ -n "$NC_DESK_USER" ] && nc-session-setup >/dev/null 2>&1 || true
+
 # the desk user's defaults for those types (their own later choices kept)
 if [ -n "$NC_DESK_USER" ] && [ -n "$defaults" ]; then
   U=$NC_DESK_USER; UHOME=$(getent passwd "$U" | cut -d: -f6)
