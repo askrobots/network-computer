@@ -31,5 +31,5 @@ for s in host rendezvous voice object-server audio; do
   if [ "$st" = active ]; then c='${color3}'; else c='${color4}'; fi
   printf "%-14s %s%s\${color}\n" "$s" "$c" "$st"
 done
-K=$(grep -o '^[A-Z_]*_KEY=.' /desk/secrets/env 2>/dev/null | cut -d= -f1 | sed 's/_API_KEY$//;s/_KEY$//' | tr 'A-Z\n' 'a-z ')
+K=$(grep -o '^[A-Z_]*_KEY=.' "$HOME/.config/dbbasic/ai.env" 2>/dev/null | cut -d= -f1 | sed 's/_API_KEY$//;s/_KEY$//' | tr 'A-Z\n' 'a-z ')
 echo "keys           ${K:-none}"

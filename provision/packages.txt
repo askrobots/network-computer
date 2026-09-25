@@ -37,3 +37,5 @@ conky-std
 gir1.2-webkit2-4.1
 # the object server's files as ~/Objects (WebDAV)
 davfs2
+# file dialogs for the dbbasic apps (Flutter's file_picker uses zenity on Linux)
+zenity

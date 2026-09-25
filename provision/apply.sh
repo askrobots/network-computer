@@ -90,6 +90,9 @@ BEFORE=$(snapshot)
 
 echo ">> packages"
 $APT update -q
+# before any install: package upgrades must never restart the desk's own
+# services (needrestart would, closing every window of the session)
+install -Dm644 files/etc/needrestart/conf.d/nc.conf /etc/needrestart/conf.d/nc.conf
 grep -vE '^\s*#|^\s*$' packages.txt | xargs $APT install -y -q
 
 echo ">> Firefox (real deb from Mozilla, not the snap stub)"
@@ -174,11 +177,25 @@ if [ -n "$DESK" ]; then
   # the Trash for files on the desk (gio won't create it at the top of a volume)
   DUID=$(id -u "$NC_DESK_USER")
   install -d -o "$NC_DESK_USER" -g "$NC_DESK_USER" -m 0700 "/desk/.Trash-$DUID"
-  if [ ! -f /desk/secrets/env ]; then
-    install -m 0600 -o "$NC_DESK_USER" -g "$NC_DESK_USER" /dev/null /desk/secrets/env
-    echo "# API keys for this desk, e.g. ANTHROPIC_API_KEY=... (lives on the desk, 0600)" > /desk/secrets/env
+fi
+# AI keys: ~/.config/dbbasic/ai.env, where every dbbasic app looks for them
+# (docs/DBBASIC-APPS.md); on a desk it lives on the desk through ~/.config.
+# /desk/secrets/env, where they used to be, becomes a link to it.
+AIENV="$UHOME/.config/dbbasic/ai.env"
+OLDSEC=/etc/nc/secrets.env; [ -n "$DESK" ] && OLDSEC=/desk/secrets/env
+runuser -u "$NC_DESK_USER" -- mkdir -p "$UHOME/.config/dbbasic"
+chmod 700 "$UHOME/.config/dbbasic"
+if [ ! -f "$AIENV" ]; then
+  if [ -f "$OLDSEC" ] && [ ! -L "$OLDSEC" ]; then
+    cp -p "$OLDSEC" "$AIENV" && rm -f "$OLDSEC" && echo "   AI keys moved to ~/.config/dbbasic/ai.env"
+  else
+    printf '%s\n' "# AI keys for every dbbasic app on this desk: ANTHROPIC_API_KEY=... OPENAI_API_KEY=..." \
+      "# optional: DBBASIC_ANTHROPIC_MODEL=... DBBASIC_OPENAI_MODEL=...  (keep this file 0600)" > "$AIENV"
   fi
 fi
+chown "$NC_DESK_USER:$NC_DESK_USER" "$AIENV"; chmod 600 "$AIENV"
+[ -L "$OLDSEC" ] || rm -f "$OLDSEC"
+ln -sfn "$(readlink -f "$AIENV")" "$OLDSEC"
 # the file manager's "Send to my device" (nc-send); added once, the user's other actions kept
 UCA="$UHOME/.config/Thunar/uca.xml"
 if ! grep -q 'nc-send' "$UCA" 2>/dev/null; then
@@ -200,12 +217,11 @@ if [ -f "$PERSON" ]; then
       pk=$(echo "$NC_EXTRA_PACKAGES" | tr ' ,' '\n\n' | grep -E '^[a-z0-9][a-z0-9.+-]+$' | tr '\n' ' ')
       [ -z "$pk" ] || { $APT install -y -q $pk >/dev/null && echo "   extra apps: $pk"; }
     fi
-    SEC=/desk/secrets/env; [ -n "$DESK" ] || SEC=/etc/nc/secrets.env
-    [ -f "$SEC" ] || install -m 0600 -o "$NC_DESK_USER" -g "$NC_DESK_USER" /dev/null "$SEC"
+    SEC=$(readlink -f "$AIENV")
     for k in ANTHROPIC_API_KEY OPENAI_API_KEY; do
       eval v=\$NC_$k
       if [ -n "$v" ] && ! grep -q "^$k=." "$SEC"; then
-        printf '%s=%s\n' "$k" "$v" >> "$SEC" && echo "   $k added to the desk's secrets"
+        printf '%s=%s\n' "$k" "$v" >> "$SEC" && echo "   $k added to ~/.config/dbbasic/ai.env"
       fi
     done
     chown "$NC_DESK_USER:$NC_DESK_USER" "$SEC"; chmod 600 "$SEC"
@@ -334,6 +350,8 @@ systemctl enable --now nc-xorg nc-desktop nc-audio nc-rendezvous nc-host nc-obje
 sleep 4
 systemctl is-active nc-xorg nc-desktop nc-audio nc-rendezvous nc-host nc-object-server nc-object-daemon nc-voice | paste -sd' ' -
 nc-object-bootstrap || echo "!! object server bootstrap failed"
+# the dbbasic apps built onto this desk (infra/apps.sh): menu entries, icons, file types
+nc-apps install || echo "!! dbbasic apps not installed"
 # the object server's files as ~/Objects (needs the key the bootstrap minted)
 systemctl enable nc-object-files >/dev/null 2>&1
 systemctl restart nc-object-files && nc-object-files status | sed 's/^/   ~\/Objects: /' || echo "!! ~/Objects did not mount"

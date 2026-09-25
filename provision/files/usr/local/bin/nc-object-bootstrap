@@ -17,7 +17,7 @@ if ! asuser "$PY" object_identity_cli.py list-users --json 2>/dev/null | grep -q
   echo "   object server user $U created"
 fi
 
-SECRETS=/desk/secrets/env; [ -r "$SECRETS" ] || SECRETS=/etc/nc/secrets.env
+SECRETS="$(getent passwd "$U" | cut -d: -f6)/.config/dbbasic/ai.env"   # the dbbasic apps' key file
 if [ -r "$SECRETS" ]; then
   asuser "$PY" - "$U" "$SECRETS" <<'PYEOF'
 import sys, object_service_keys, os

@@ -45,6 +45,8 @@ check "desktop dashboard running (conky)"  pgrep -x conky
 check "object server app windows (WebKitGTK)" python3 -c "import gi; gi.require_version(\"WebKit2\", \"4.1\"); from gi.repository import WebKit2"
 check "object server daemon (notifications)" systemctl is-active --quiet nc-object-daemon
 check "object server files as ~/Objects (WebDAV)" nc-object-files status
+check "AI keys in ~/.config/dbbasic/ai.env (0600, the user's)" sh -c '. /etc/nc/env; H=$(getent passwd "$NC_DESK_USER" | cut -d: -f6); test "$(stat -L -c %U:%a "$H/.config/dbbasic/ai.env")" = "$NC_DESK_USER:600"'
+check "package installs never restart nc-* services" test -f /etc/needrestart/conf.d/nc.conf
 check "~/Objects key is root-only"          sh -c 'test "$(stat -L -c %U:%a /etc/nc/davfs2.secrets)" = root:600'
 check "/dav/ refuses a request without a key" sh -c 'curl -s -o /dev/null -w "%{http_code}" -X PROPFIND http://127.0.0.1:8001/dav/files/ | grep -qx 401'
 check "ALSA apps record from pulse"      sh -c 'timeout 5 arecord -q -D default -d 1 -f S16_LE -r 48000 -c 2 /dev/null'

@@ -14,7 +14,10 @@ M=$(getent passwd "$U" | cut -d: -f6)/Objects
 URL=http://127.0.0.1:8001/dav/files/
 case "$1" in
   mount)
-    mountpoint -q "$M" && exit 0
+    mountpoint -q "$M" && ls "$M" >/dev/null 2>&1 && exit 0
+    # a dead mount (davfs2 was killed): "Transport endpoint is not connected"
+    if grep -qs " $M fuse" /proc/mounts; then umount -l "$M"; fi
+    rm -f "/var/run/mount.davfs/$(echo "${M#/}" | tr / -).pid"
     [ -s /etc/nc/davfs2.secrets ] || { echo "no /etc/nc/davfs2.secrets (run nc-object-bootstrap)"; exit 1; }
     install -d -o "$U" -g "$U" "$M"
     # uid/gid: the files are the desk user's; 0600/0700 like the rest of home

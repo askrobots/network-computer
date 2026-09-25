@@ -10,5 +10,10 @@ RemainAfterExit=yes
 ExecStartPre=/bin/sh -c 'for i in $(seq 60); do curl -sf http://127.0.0.1:8001/health >/dev/null && exit 0; sleep 1; done; exit 1'
 ExecStart=/usr/local/bin/nc-object-files mount
 ExecStop=/usr/local/bin/nc-object-files umount
+# davfs2 runs on after mounting; on stop, umount lets it upload what is left
+# and exit. systemd must not kill it first: that loses those uploads and
+# leaves a dead mount behind.
+KillMode=process
+TimeoutStopSec=120
 [Install]
 WantedBy=multi-user.target

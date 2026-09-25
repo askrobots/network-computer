@@ -1,0 +1,76 @@
+#!/bin/sh
+# The dbbasic apps (Writer, Spreadsheet, Slides, Draw, Shell, Webmaster,
+# Porter) on this desk: built binaries live on the desk in /desk/apps/NAME/
+# (or /opt/dbbasic/NAME without a desk), each with an nc-app.env manifest
+# written by infra/apps.sh. This makes them part of the desktop: a menu
+# entry, an icon, a command (dbbasic-NAME), and their file types, so a .dbw
+# in ~/Objects or ~/Documents opens in Writer on a double click.
+#
+#   nc-apps install   (re)create entries for every app present; run by apply.sh
+#   nc-apps list
+#
+# Manifest (nc-app.env): NAME, TITLE, BINARY, COMMENT, CATEGORIES,
+# EXTENSIONS (space separated), MIME (the type for them), ICON (a png in the
+# bundle).
+set -e
+ROOT=/desk/apps; [ -d /desk/nc ] || ROOT=/opt/dbbasic
+[ -f /etc/nc/env ] && . /etc/nc/env
+case "$1" in
+  list)
+    for m in "$ROOT"/*/nc-app.env; do [ -f "$m" ] && (. "$m"; echo "$NAME  $TITLE  $ROOT/$NAME/$BINARY"); done
+    exit 0 ;;
+  install) ;;
+  *) echo "usage: nc-apps install|list"; exit 2 ;;
+esac
+
+MIMEXML=/usr/share/mime/packages/dbbasic.xml
+printf '<?xml version="1.0" encoding="UTF-8"?>\n<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">\n' > "$MIMEXML.new"
+defaults=""
+for m in "$ROOT"/*/nc-app.env; do
+  [ -f "$m" ] || continue
+  NAME= TITLE= BINARY= COMMENT= CATEGORIES= EXTENSIONS= MIME= ICON=
+  . "$m"
+  echo "$NAME" | grep -Eq '^[a-z][a-z0-9-]*$' || { echo "skipping $m: bad NAME"; continue; }
+  dir="$ROOT/$NAME"
+  [ -x "$dir/$BINARY" ] || { echo "skipping $NAME: no $dir/$BINARY"; continue; }
+  ln -sfn "$dir/$BINARY" "/usr/local/bin/dbbasic-$NAME"
+  if [ -n "$ICON" ] && [ -f "$dir/$ICON" ]; then
+    install -Dm644 "$dir/$ICON" "/usr/share/icons/hicolor/512x512/apps/dbbasic-$NAME.png"
+  fi
+  mimeline=""
+  if [ -n "$MIME" ] && [ -n "$EXTENSIONS" ]; then
+    printf '  <mime-type type="%s">\n    <comment>%s document</comment>\n' "$MIME" "$TITLE" >> "$MIMEXML.new"
+    for e in $EXTENSIONS; do printf '    <glob pattern="*.%s"/>\n' "$e" >> "$MIMEXML.new"; done
+    printf '  </mime-type>\n' >> "$MIMEXML.new"
+    mimeline="MimeType=$MIME;"
+    defaults="$defaults $MIME=dbbasic-$NAME.desktop"
+  fi
+  cat > "/usr/share/applications/dbbasic-$NAME.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=$TITLE
+Comment=$COMMENT
+Exec=$dir/$BINARY %f
+Icon=dbbasic-$NAME
+Categories=$CATEGORIES
+StartupWMClass=$BINARY
+$mimeline
+EOF
+  echo "   $TITLE"
+done
+printf '</mime-info>\n' >> "$MIMEXML.new"; mv "$MIMEXML.new" "$MIMEXML"
+update-mime-database /usr/share/mime >/dev/null 2>&1 || true
+update-desktop-database /usr/share/applications >/dev/null 2>&1 || true
+gtk-update-icon-cache -q /usr/share/icons/hicolor 2>/dev/null || true
+
+# the desk user's defaults for those types (their own later choices kept)
+if [ -n "$NC_DESK_USER" ] && [ -n "$defaults" ]; then
+  U=$NC_DESK_USER; UHOME=$(getent passwd "$U" | cut -d: -f6)
+  L="$UHOME/.config/mimeapps.list"
+  for d in $defaults; do
+    t=${d%%=*}
+    grep -qs "^$t=" "$L" && continue
+    runuser -u "$U" -- sh -c "grep -qs '^\[Default Applications\]' '$L' || printf '[Default Applications]\n' >> '$L'
+      sed -i '/^\[Default Applications\]/a $d' '$L'"
+  done
+fi
