@@ -216,6 +216,7 @@
     <span class="pill" id="p-net">connecting…</span>
     <button class="bar-btn" id="b-display" title="Screen size and scale">🖥️</button>
     <button class="bar-btn" id="b-mic" title="Microphone">🎤</button>
+    <button class="bar-btn" id="b-cam" title="Camera: the desk's webcam (network-computer camera)">📷</button>
     <button class="bar-btn" id="b-graphs" title="Graphs">📈</button>
     <button class="bar-btn" id="b-stats" title="Stats">📊</button>
     <button class="bar-btn" id="b-launch" title="Search and launch on the desk (Alt+Space)">🔍</button>
@@ -293,7 +294,7 @@ try{localStorage.removeItem('nc.pin')}catch(e){}  // PIN no longer stored; pairi
 $('#f-cursor').checked = store.get('cursor','1')==='1';
 $('#f-relay').checked  = store.get('relay','0')==='1';
 
-let ws, pc, dc, ctl, statsTimer, watchdog, cfg, hostName, audioTx=null, micStream=null;
+let ws, pc, dc, ctl, statsTimer, watchdog, cfg, hostName, audioTx=null, micStream=null, camTx=null, camStream=null;
 let localCursor=true, retryWanted=false, retries=0, lastFrames=0;
 
 function msg(t,cls){const m=$('#f-msg');m.textContent=t||'';m.className='msg '+(cls||'info');}
@@ -396,6 +397,9 @@ async function openPeer(){
 
   pc.addTransceiver('video',{direction:'recvonly'});
   audioTx = pc.addTransceiver('audio',{direction:'sendrecv'}); // mic attached on demand
+  // the camera: sent only, attached while it is on (so the camera light is honest)
+  camTx = pc.addTransceiver('video',{direction:'sendonly'});
+  if(camStream) camTx.sender.replaceTrack(camStream.getVideoTracks()[0]); // reconnected with it on
   dc=pc.createDataChannel('input',{ordered:false,maxRetransmits:0});
   // reliable + ordered: requests that must not be dropped (screen size, later files and clipboard)
   ctl=pc.createDataChannel('control');
@@ -472,7 +476,7 @@ function onDropped(){
 }
 
 function teardown(){
-  retryWanted=false; stopTimers(); setMic(false);
+  retryWanted=false; stopTimers(); setMic(false); setCam(false);
   try{dc&&dc.close()}catch(e){} try{pc&&pc.close()}catch(e){} try{ws&&ws.close()}catch(e){}
   const v=$('#v'); v.srcObject=null;
   $('#session').classList.remove('on');
@@ -638,6 +642,28 @@ async function setMic(on){
   }
 }
 $('#b-mic').onclick=()=>setMic(!micStream);
+
+/* ---------- camera ---------- */
+// This device's camera becomes "network-computer camera" on the desk, a
+// webcam any app there can pick (a video call in the desk's browser).
+async function setCam(on){
+  const btn=$('#b-cam');
+  if(on){
+    if(!window.isSecureContext){ toast('The camera needs secure mode (https)'); return; }
+    try{
+      const s=await navigator.mediaDevices.getUserMedia({audio:false,
+        video:{width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30},facingMode:'user'}});
+      if(camTx) await camTx.sender.replaceTrack(s.getVideoTracks()[0]);
+      camStream=s; btn.classList.add('active');
+      toast('Camera on: pick "network-computer camera" in the app on the desk');
+    }catch(e){ toast('Camera blocked: '+e.message); }
+  }else{
+    if(camTx) await camTx.sender.replaceTrack(null).catch(()=>{});
+    if(camStream){ camStream.getTracks().forEach(t=>t.stop()); camStream=null; }
+    btn.classList.remove('active');
+  }
+}
+$('#b-cam').onclick=()=>setCam(!camStream);
 $('#mic-dev').onchange=e=>useMic(e.target.value).catch(err=>toast('Could not switch: '+err.message));
 
 /* ---------- screen size and scale ---------- */
