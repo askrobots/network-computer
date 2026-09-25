@@ -103,3 +103,23 @@ copies). It sits naturally in the app kit, next to `AppControl`: a destination
 Printing through "My device" is where it pays first: the destination is a real sheet of
 paper.
 
+## 8. Nothing to lose, nothing to name
+
+*From using the desk, 2026-09-25: a frozen desk lost unsaved work, and every
+app then asked "restore?" at start.*
+
+A document saves itself. A new one, as soon as there is something to it, gets a
+file of its own, named by its heading or the AI ("Quarterly report for Acme",
+not "Untitled 3"), in the place this desk or computer keeps documents
+(`~/.config/dbbasic/places.env`: one setting for every app, each app in a folder
+of its own name). A note says where, with Rename. After that it keeps saving to its
+file; closing it asks nothing. Crash recovery is only the safety net for the
+seconds in between, and it is offered in the app's own words, never a browser
+dialog.
+
+Save, Save As and a name you choose still work: the AI's name is a suggestion
+(rule 4), never for text that looks like credentials.
+
+Where it shows today: Writer (auto-save and AI names), Webmaster (auto-save once
+a site has a folder). Next: Spreadsheet, Slides, Draw, Cabinet.
+

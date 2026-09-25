@@ -219,6 +219,18 @@ fi
 chown "$NC_DESK_USER:$NC_DESK_USER" "$AIENV"; chmod 600 "$AIENV"
 [ -L "$OLDSEC" ] || rm -f "$OLDSEC"
 ln -sfn "$(readlink -f "$AIENV")" "$OLDSEC"
+# where the dbbasic apps file what they save by themselves (auto-save names
+# new documents): one place for every app, this desk's own; written once,
+# the person's changes kept
+PLACES="$UHOME/.config/dbbasic/places.env"
+if [ ! -f "$PLACES" ]; then
+  printf '%s\n' "# Where the dbbasic apps put documents they save by themselves (each app in" \
+    "# a folder of its name: ~/Documents/Writer). ~/Documents is on the desk volume." \
+    "# ~/Objects instead keeps them in your object server (every device, and search)." \
+    "DOCUMENTS=~/Documents" \
+    "# one app somewhere else, used as is:  WRITER_DOCUMENTS=~/Objects/Writing" > "$PLACES"
+  chown "$NC_DESK_USER:$NC_DESK_USER" "$PLACES"
+fi
 # the file manager's "Send to my device" (nc-send); added once, the user's other actions kept
 UCA="$UHOME/.config/Thunar/uca.xml"
 if ! grep -q 'nc-send' "$UCA" 2>/dev/null; then
