@@ -501,6 +501,8 @@ Actions, done in order:
   {"do": "open", "target": "<file path like ~/Desktop/x.pdf, or a URL>"}   (speech loses
      capitals; open finds the file whatever its case, and if it is missing the result lists
      what is there, so just open it; no need to ls first)
+  {"do": "dictate"}   dictation: from now on what they say is typed where the cursor is, until
+     they say "stop dictation" (for "take this down", "type what I say", "I'll dictate")
   {"do": "print", "path": "~/Documents/x.pdf"}   print on the device they are connected from
      (its own print dialog opens there: AirPrint on an iPhone or iPad); PDFs, text, pictures.
      In an app, File > Print already prints there: "My device" is the default printer.
@@ -683,6 +685,10 @@ def context():
             + (f"; reminders: {pending}" if pending else "") + "]")
 
 
+DICTATE_ON = re.compile(r"^\W*(?:(?:please|ok|okay|now|so)\W+)?(?:(?:start|begin)\s+(?:dictation|dictating)|dictation(?:\s+mode)?\s+on|dictation\s+mode)\b[\s,.:;-]*", re.I)
+DICTATE_OFF = re.compile(r"\b(?:stop|end|finish)\s+(?:dictation|dictating)\b[.!]?", re.I)
+
+
 def parse_reply(reply):
     """-> (say, actions, more). Models don't always send the one object asked
     for: sometimes a bare action and then the reply ({"do": "ls", ...}
@@ -797,6 +803,8 @@ class Voice:
         self.utterances = queue.Queue()
         self.history = []
         self.pending = None   # actions waiting for the user's yes or no
+        self.dictating = False   # dictation: what is heard is typed, not acted on
+        self.dict_fresh = True   # at the start of a line: no space in front
         global OBJ_FOR_ACTIONS
         OBJ_FOR_ACTIONS = self.obj
         threading.Thread(target=self.worker, daemon=True).start()
@@ -929,12 +937,68 @@ class Voice:
         if not text:
             return
         event("heard", text)
+        if self.dictating:
+            self.dictate(text)
+            return
+        m = DICTATE_ON.match(text)
+        if m and not self.pending:
+            self.start_dictation(text[m.end():])
+            return
         if self.pending:
             self.answer_pending(text)
         else:
             self.task(text, mark)
         steps = " ".join(f"{n} {b - a:.2f}" for (_, a), (n, b) in zip(t, t[1:]))
         log(f"timing: {steps}")
+
+    # ---------- dictation ----------
+    # "start dictation" (or the AI's dictate action for "take this down"): from
+    # then on every phrase is typed where the cursor is, in whatever app has
+    # focus, with no AI and no approvals, until "stop dictation". "new
+    # paragraph" and "new line" work as said.
+    def start_dictation(self, rest=""):
+        self.dictating, self.dict_fresh = True, True
+        if not self.on or self.once:
+            self.start(once=False)   # keep listening until "stop dictation"
+        else:
+            self.once = False
+        event("did", "dictation on: say \"stop dictation\" to finish")
+        self.speak_short("Dictating.")
+        if rest.strip(" ,.:;-"):
+            self.dictate(rest.strip(" ,:;-"))
+
+    def dictate(self, text):
+        stop = DICTATE_OFF.search(text)
+        if stop:
+            text = text[:stop.start()]
+        for part in re.split(r"(?i)\s*\b(new paragraph|new line)\b[.,!]?\s*", text):
+            if not part:
+                continue
+            low = part.lower()
+            if low == "new paragraph":
+                desk("xdotool", "key", "Return")
+                self.dict_fresh = True
+            elif low == "new line":
+                desk("xdotool", "key", "shift+Return")
+                self.dict_fresh = True
+            else:
+                chunk = part.strip()
+                if chunk:
+                    desk("xdotool", "type", "--delay", "8", "--", ("" if self.dict_fresh else " ") + chunk,
+                         timeout=120)
+                    self.dict_fresh = False
+        if stop:
+            self.dictating = False
+            event("did", "dictation off")
+            self.speak_short("Done.")
+        else:
+            event("did", "typed: " + (text if len(text) <= 80 else text[:80] + "…"))
+
+    def speak_short(self, words):
+        try:
+            self.speak(words, lambda *_: None, on_start=lambda: event("said", words))
+        except Exception:
+            pass
 
     def task(self, text, mark):
         """One request, in up to MAX_STEPS rounds of think, act, (look)."""
@@ -958,6 +1022,10 @@ class Voice:
             for i, a in enumerate(actions):
                 if a.get("do") == "look":
                     look = True
+                    continue
+                if a.get("do") == "dictate":
+                    self.start_dictation()
+                    results.append("dictation on")
                     continue
                 verdict, why = self.approve(text, a, window)
                 if verdict == "ask":
