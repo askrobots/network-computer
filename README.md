@@ -27,8 +27,8 @@ and files. See [docs/PLAN.md](docs/PLAN.md) for the design,
   voice apps. Pick the mic in the page and watch its level.
 - **Keyboard and mouse that feel local:** any layout (QWERTY, Dvorak, Colemak... are
   translated in the page, so the desk stays US), UK/German/French/Spanish, and on a Mac
-  ⌘ acts as Ctrl on the desk, so ⌘C, ⌘V and ⌘Z do what your fingers expect. Touch on
-  phones: tap to click, drag to move.
+  ⌘ acts as Ctrl on the desk, so ⌘C, ⌘V and ⌘Z do what your fingers expect. On an
+  iPad or phone with no mouse, see [Touch devices](#touch-devices-no-mouse).
 - **Clipboard both ways (text):** ⌘/Ctrl+V pastes your device's clipboard on the desk;
   copying on the desk comes back to your device. The 📋↑ and 📋↓ buttons move it without
   a keystroke, so the desk's right-click → Paste works too.
@@ -60,8 +60,38 @@ and files. See [docs/PLAN.md](docs/PLAN.md) for the design,
 | Client | Where | Status |
 |---|---|---|
 | Browser | Built into `nc-rendezvous`: any modern browser, including Safari on iPhone and iPad | Everything above |
-| [Flutter app](https://github.com/askrobots/network-computer-flutter) | iPhone, iPad, Android, macOS, Windows, Linux | Picture, sound, mic, touch and keyboard, pairing, voice button and transcript, search bar, screen size, clipboard both ways; file transfer not yet |
+| [Flutter app](https://github.com/askrobots/network-computer-flutter) | iPhone, iPad, Android, macOS, Windows, Linux | Picture, sound, mic, touch gestures and keyboard, pairing, voice button and transcript, search bar, screen size, clipboard and files both ways |
 | `nc-probe` | Command line | Test client: path, frame rate, audio timing, clipboard and file transfer |
+
+### Touch devices (no mouse)
+
+A desktop wants double-clicks, right-clicks and drags; a finger has none of them. The
+app turns touch into those (in `lib/touch_pad.dart`):
+
+| On the glass | On the desk |
+|---|---|
+| Tap | Left click, where the finger is |
+| Double tap | Double click (open a file or folder) |
+| Touch and hold, let go | Right click (context menu) |
+| Two-finger tap | Right click too |
+| Touch and hold, then move | Drag: move a window, a file, or select text |
+| One-finger drag | Move the pointer, like a trackpad |
+| Two-finger drag | Scroll |
+
+Positions are measured against the desk's picture, not the screen around it, so a tap
+lands where you touched even with black bars around the picture.
+
+**Typing:** the ⌨ button brings up the device's own keyboard (the iOS keyboard on an
+iPad or iPhone) and, above it, a bar with the keys it lacks: esc, tab, ctrl, alt,
+super, shift, the arrows, home/end, page up/down, delete, and **fn** for F1–F12 (htop in
+a terminal is a good test). ctrl, alt, super and shift apply to the next key and then
+let go, so tap ctrl then c to copy; hold one down on the bar to keep it on until you
+tap it again. **abc** brings the keyboard back if you hid it. Characters go as the US
+keys that type them (the desk stays US); ones a US keyboard can't type, like é or
+emoji, are skipped: paste them with 📋↑ instead.
+
+A mouse, trackpad or keyboard attached to the iPad works as it would on a computer,
+and the voice button often beats all of the above: "open my downloads folder".
 
 ## How it works
 
