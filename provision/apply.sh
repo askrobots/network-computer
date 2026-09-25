@@ -184,6 +184,15 @@ if ! id "$NC_DESK_USER" >/dev/null 2>&1; then
   useradd -m -u 1000 -U -s /bin/bash "$NC_DESK_USER"
 fi
 UHOME=$(getent passwd "$NC_DESK_USER" | cut -d: -f6)
+# ~/Downloads and ~/Pictures on this computer's own disk (not the desk): they
+# did not exist, and the desktop sent downloads loose into the home folder.
+# The standard folder settings are pointed at them unless the person chose
+# others (a setting still at "$HOME/" means nobody did).
+for d in Downloads Pictures; do runuser -u "$NC_DESK_USER" -- mkdir -p "$UHOME/$d"; done
+UDIRS="$UHOME/.config/user-dirs.dirs"
+if [ -f "$UDIRS" ]; then
+  sed -i 's|^XDG_DOWNLOAD_DIR="\$HOME/"$|XDG_DOWNLOAD_DIR="$HOME/Downloads"|; s|^XDG_PICTURES_DIR="\$HOME/"$|XDG_PICTURES_DIR="$HOME/Pictures"|' "$UDIRS"
+fi
 if [ -n "$DESK" ]; then
   # the locker: only these live on the desk; downloads and caches stay local
   install -d -o "$NC_DESK_USER" -g "$NC_DESK_USER" -m 0755 /desk/home

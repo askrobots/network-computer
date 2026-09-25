@@ -12,6 +12,9 @@ ENVS=$(tr '\0' '\n' < "/proc/$PID/environ")
 BUS=$(echo "$ENVS" | sed -n 's/^DBUS_SESSION_BUS_ADDRESS=//p')
 RUN=$(echo "$ENVS" | sed -n 's/^XDG_RUNTIME_DIR=//p')
 H=$(getent passwd "$U" | cut -d: -f6)
+# start in the person's home, not wherever root happened to be: apps
+# started by voice or a script opened terminals in /root
+cd "$H" 2>/dev/null || true
 if [ "$(id -un)" = "$U" ]; then
   exec env DISPLAY=:0 DBUS_SESSION_BUS_ADDRESS="$BUS" XDG_RUNTIME_DIR="$RUN" "$@"
 fi
