@@ -50,15 +50,21 @@ type camWriter interface {
 	Close() error
 }
 
-func newCamWriter(mime string, w io.Writer) (camWriter, string, error) {
+func camFormat(mime string) string {
 	switch strings.ToLower(mime) {
 	case strings.ToLower(webrtc.MimeTypeH264):
-		return h264writer.NewWith(w), "h264", nil
+		return "h264"
 	case strings.ToLower(webrtc.MimeTypeVP8), strings.ToLower(webrtc.MimeTypeVP9), strings.ToLower(webrtc.MimeTypeAV1):
-		iw, err := ivfwriter.NewWith(w, ivfwriter.WithCodec(mime))
-		return iw, "ivf", err
+		return "ivf"
 	}
-	return nil, "", errors.New("unsupported camera codec " + mime)
+	return ""
+}
+
+func newCamWriter(mime string, w io.Writer) (camWriter, error) {
+	if camFormat(mime) == "h264" {
+		return h264writer.NewWith(w), nil
+	}
+	return ivfwriter.NewWith(w, ivfwriter.WithCodec(mime))
 }
 
 // camOwner lets only the newest camera write to the device.
@@ -107,6 +113,7 @@ func (h *host) playCamera(ctx context.Context, pc *webrtc.PeerConnection, track 
 		track.SetReadDeadline(time.Time{})
 		first, _, err := track.ReadRTP()
 		if err != nil {
+			log.Printf("camera: track ended (%v)", err)
 			return
 		}
 		if len(first.Payload) == 0 {
@@ -154,16 +161,25 @@ func (h *host) cameraRun(ctx context.Context, pc *webrtc.PeerConnection, track *
 	id := h.cam.take(cancel)
 	defer h.cam.release(id)
 
-	pr, pw := io.Pipe()
-	w, format, err := newCamWriter(mime, pw)
-	if err != nil {
-		return err
+	format := camFormat(mime)
+	if format == "" {
+		return errors.New("unsupported camera codec " + mime)
 	}
+	// ffmpeg first: the IVF writer writes its header into the pipe at once,
+	// which blocks until someone reads it
+	pr, pw := io.Pipe()
 	args := camArgs(format, h.camera)
 	cmd := exec.CommandContext(rctx, "ffmpeg", args...)
 	cmd.Stdin = pr
 	cmd.Stderr = os.Stderr
+	log.Printf("ffmpeg(camera) %s", strings.Join(args, " "))
 	if err := cmd.Start(); err != nil {
+		return err
+	}
+	w, err := newCamWriter(mime, pw)
+	if err != nil {
+		pw.Close()
+		cmd.Wait()
 		return err
 	}
 	log.Printf("camera: on -> %s (%s)", h.camera, mime)
