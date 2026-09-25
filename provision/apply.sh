@@ -211,9 +211,12 @@ if ! grep -q 'nc-print' "$UCA" 2>/dev/null; then
 fi
 
 echo ">> camera: the connected device's camera as a webcam here"
-# v4l2loopback ships with Ubuntu's kernel modules; a kernel without it gets the dkms build
-if ! modinfo v4l2loopback >/dev/null 2>&1; then
-  $APT install -y -q "linux-modules-extra-$(uname -r)" >/dev/null 2>&1 || $APT install -y -q v4l2loopback-dkms
+# v4l2loopback ships with Ubuntu's kernel modules, but the video4linux core it
+# needs (videodev) is in the "extra" modules, which cloud images leave out: those
+# for the running kernel, and the metapackage that follows kernel updates
+if ! modinfo videodev >/dev/null 2>&1 || ! modinfo v4l2loopback >/dev/null 2>&1; then
+  $APT install -y -q "linux-modules-extra-$(uname -r)" linux-image-extra-virtual >/dev/null 2>&1 ||
+    $APT install -y -q v4l2loopback-dkms >/dev/null 2>&1 || true
 fi
 if [ -e /dev/video10 ] && [ "$(cat /sys/class/video4linux/video10/name 2>/dev/null)" != "network-computer camera" ]; then
   modprobe -r v4l2loopback 2>/dev/null || true   # loaded before with other options
