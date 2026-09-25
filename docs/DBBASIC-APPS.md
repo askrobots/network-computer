@@ -64,8 +64,28 @@ infra/apps.sh build writer shell     # build and install (see: infra/apps.sh lis
 - Each app gets its own Linux identity (application id) at build time: Slides
   and Spreadsheet began as copies of Writer and would otherwise share its id,
   and GTK would hand a second app to the first one's window.
-- Writer, Spreadsheet and Slides edit in a web view. `flutter_inappwebview` has
-  no Linux build Ubuntu can use (its beta needs WPE WebKit, which Ubuntu does not
-  package), so Linux builds swap in `zikzak_inappwebview`, a fork with the same
-  API on WebKitGTK 4.1, in the build copy only; the repos and macOS builds keep
-  theirs. This needs Flutter 3.38.6 or newer on the build machine.
+- Writer, Spreadsheet and Slides edit in a web view. `flutter_inappwebview`
+  has no Linux build Ubuntu can use (its beta needs WPE WebKit, which Ubuntu
+  does not package; a fork that draws WebKitGTK offscreen showed a blank page
+  on a desk without a GPU). On Linux they use `webview_all`, a real WebKitGTK
+  view over the window, behind a small adapter (`EditorWebView`); macOS keeps
+  `flutter_inappwebview`. Their Open/Save dialogs on Linux are GTK's own
+  (`file_selector`): zenity, which `file_picker` uses there, ignores a
+  suggested file name.
+
+## What is on the desk (2026-09-25)
+
+| App | Command | Notes |
+|---|---|---|
+| Writer | `dbbasic-writer` | `.dbw` opens in it; suggests a file name on save (heading, else AI) |
+| Spreadsheet | `dbbasic-spreadsheet` | |
+| Slides | `dbbasic-slides` | |
+| Shell | `dbbasic-shell` | AI terminal; keys from `ai.env`, Sonnet 5 |
+| Webmaster | `dbbasic-webmaster` | as it was; the object server can make it simpler later |
+| Porter | `dbbasic-porter` | format converter |
+| Draw | `dbbasic-draw` | first Linux build; its OpenAI key is still its own setting |
+
+Known gaps: Spreadsheet and Slides still save as Writer's `.dbw` (they began as
+its copy) and have no file type of their own yet; Draw does not read `ai.env`
+yet; builds reach only the desk `infra/apps.sh` points at (other people's desks
+need their own build or a copy of `/desk/apps`).
