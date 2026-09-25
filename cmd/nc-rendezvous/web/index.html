@@ -838,13 +838,35 @@ function receiveFile(ch){
       if(!hdr){ try{ hdr=JSON.parse(e.data); }catch(err){ ch.send('error: bad header'); } return; }
       if(e.data==='end'){
         if(got!==hdr.size){ ch.send(`error: got ${got} of ${hdr.size} bytes`); return; }
-        offerDownload(hdr.name, new Blob(parts)); parts=[]; ch.send('ok '+hdr.name);
+        const blob=new Blob(parts, hdr.print?{type:'application/pdf'}:{});
+        if(hdr.print) printFile(hdr.name, blob); else offerDownload(hdr.name, blob);
+        parts=[]; ch.send('ok '+hdr.name); hdr=null; got=0;
       }
       return;
     }
     parts.push(e.data); got+=e.data.byteLength;
     if(hdr&&hdr.size>1<<20&&Date.now()-shown>400){ shown=Date.now(); toast(`Receiving ${hdr.name}: ${Math.round(got*100/hdr.size)}%`); }
   };
+}
+// Printed on the desk's "My device" printer: this browser's print dialog.
+// Chrome and Firefox print a PDF from a hidden frame; Safari (and iOS) does
+// not, and a pop-up without a click is blocked, so there it is a 🖨 button
+// that opens the PDF, whose viewer prints. Either way it can be saved too.
+function printFile(name,blob){
+  const url=URL.createObjectURL(blob), box=$('#downloads'), a=document.createElement('a');
+  a.href=url; a.target='_blank'; a.rel='noopener'; a.textContent=`🖨 ${name}`;
+  a.onclick=()=>setTimeout(()=>{ a.remove(); box.classList.toggle('on',box.children.length>0); },1500);
+  box.appendChild(a); box.classList.add('on');
+  const safari=/^((?!chrome|chromium|android|crios|fxios|edg).)*safari/i.test(navigator.userAgent);
+  if(safari){ toast(`To print from the desk: ${name} (click 🖨)`); return; }
+  const f=document.createElement('iframe');
+  f.style.cssText='position:fixed;right:0;bottom:0;width:1px;height:1px;border:0;opacity:0';
+  f.onload=()=>{
+    try{ f.contentWindow.focus(); f.contentWindow.print(); toast(`Printing ${name}`); }
+    catch(err){ toast(`To print from the desk: ${name} (click 🖨)`); }
+  };
+  f.src=url; document.body.appendChild(f);
+  setTimeout(()=>f.remove(),10*60*1000);
 }
 function offerDownload(name,blob){
   const box=$('#downloads'), a=document.createElement('a'), url=URL.createObjectURL(blob);

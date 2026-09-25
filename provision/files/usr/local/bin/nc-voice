@@ -391,6 +391,13 @@ def act(a, scale=None):
             t = local_path(t)
         subprocess.Popen(["nc-as-user", "xdg-open", t], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return f"opened {t.replace(os.path.expanduser('~'), '~', 1)}"
+    if kind == "print":
+        t = local_path(os.path.expanduser(a.get("path", "")))
+        r = subprocess.run(["lp", "-d", "my-device", "-t", os.path.basename(t), t],
+                           capture_output=True, text=True, timeout=30)
+        if r.returncode:
+            raise RuntimeError((r.stderr or r.stdout).strip() or "lp failed")
+        return f"sent {os.path.basename(t)} to the print dialog on their device"
     if kind == "type":
         text = a.get("text", "")
         desk("xdotool", "type", "--delay", "8", "--", text, timeout=60)
@@ -494,6 +501,9 @@ Actions, done in order:
   {"do": "open", "target": "<file path like ~/Desktop/x.pdf, or a URL>"}   (speech loses
      capitals; open finds the file whatever its case, and if it is missing the result lists
      what is there, so just open it; no need to ls first)
+  {"do": "print", "path": "~/Documents/x.pdf"}   print on the device they are connected from
+     (its own print dialog opens there: AirPrint on an iPhone or iPad); PDFs, text, pictures.
+     In an app, File > Print already prints there: "My device" is the default printer.
   {"do": "search", "query": "<text>"}   (opens the desk's search bar with it)
   {"do": "type", "text": "<text to type into the focused window>"}
   {"do": "keys", "keys": "<xdotool key names, e.g. ctrl+s or Return>"}
@@ -709,7 +719,7 @@ def parse_reply(reply):
 # app (click, drag, type, keys) get a quick second look from another model,
 # which sees the user's words and exactly what is about to happen. Trash, and
 # anything the reviewer is unsure of, is asked of the user out loud.
-SAFE = {"open_app", "switch", "close", "arrange", "open", "search", "look", "ls", "mkdir", "device",
+SAFE = {"open_app", "switch", "close", "arrange", "open", "print", "search", "look", "ls", "mkdir", "device",
         "move", "copy", "scroll", "read_page", "find", "note", "set_style", "remind",
         "cancel_reminder"}
 REVIEW = {"click", "drag", "type", "keys"}

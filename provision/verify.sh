@@ -33,6 +33,7 @@ check "waveform launcher installed"      sh -c 'command -v ffplay && command -v 
 check "sound recorder (Audacity) installed" command -v audacity
 check "video player (VLC) is the default"  sh -c 'command -v vlc && grep -q "^video/mp4=vlc.desktop" /etc/xdg/mimeapps.list'
 check "file transfer (nc-send, Send to my device)" sh -c 'command -v nc-send && test -S /run/nc-host/send.sock && . /etc/nc/env; grep -q nc-send /home/$NC_DESK_USER/.config/Thunar/uca.xml'
+check "printing (My device is the default printer)" sh -c 'lpstat -d | grep -q my-device && lpstat -p my-device | grep -q enabled && [ "$(stat -c %a /usr/lib/cups/backend/ncdevice)" = 700 ]'
 check "search and launch bar (Alt+Space)" sh -c 'command -v rofi && command -v nc-launch && nc-as-user xfconf-query -c xfce4-keyboard-shortcuts -p "/commands/custom/<Alt>space" | grep -qx nc-launch'
 check "object server answers (local only)" sh -c 'curl -sf http://127.0.0.1:8001/health >/dev/null && ! ss -ltn | grep -q "0.0.0.0:8001"'
 check "voice listener running (nc-voice)"   systemctl is-active --quiet nc-voice

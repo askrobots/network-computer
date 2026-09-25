@@ -30,6 +30,10 @@ import (
 //   - desk to client: nc-send (the file manager's "Send to my device") PUTs
 //     the file into the -send-socket unix socket; the host passes it to every
 //     connected client, which offers it as a download.
+//   - printing: the desk's "My device" printer (a CUPS backend, ncdevice)
+//     PUTs the job as a PDF with ?print=1; the header then says "print": true
+//     and the client opens its own print dialog with it (AirPrint on an
+//     iPhone or iPad). A client that does not know "print" just saves it.
 const (
 	filePiece     = 16 << 10
 	fileHighWater = 4 << 20 // bytes queued on a channel before waiting
@@ -37,8 +41,9 @@ const (
 )
 
 type fileHeader struct {
-	Name string `json:"name"`
-	Size int64  `json:"size"`
+	Name  string `json:"name"`
+	Size  int64  `json:"size"`
+	Print bool   `json:"print,omitempty"`
 }
 
 // receiveFile saves the files a client sends on one channel, one at a time.
@@ -163,7 +168,7 @@ func newFileOut(dc *webrtc.DataChannel) *fileOut {
 }
 
 // sendFile streams a file to one client on a new channel (the browser's way).
-func sendFile(ctx context.Context, pc *webrtc.PeerConnection, name string, r io.Reader, size int64) error {
+func sendFile(ctx context.Context, pc *webrtc.PeerConnection, hdr fileHeader, r io.Reader) error {
 	dc, err := pc.CreateDataChannel("file", nil)
 	if err != nil {
 		return err
@@ -179,18 +184,18 @@ func sendFile(ctx context.Context, pc *webrtc.PeerConnection, name string, r io.
 	case <-time.After(10 * time.Second):
 		return errors.New("the device did not open a channel")
 	}
-	return o.send(ctx, name, r, size)
+	return o.send(ctx, hdr, r)
 }
 
 // send streams one file and waits for the client's answer.
-func (o *fileOut) send(ctx context.Context, name string, r io.Reader, size int64) error {
+func (o *fileOut) send(ctx context.Context, hdr fileHeader, r io.Reader) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	for len(o.reply) > 0 { // answers left from an earlier file
 		<-o.reply
 	}
 	dc := o.dc
-	b, _ := json.Marshal(fileHeader{Name: name, Size: size})
+	b, _ := json.Marshal(hdr)
 	if err := dc.SendText(string(b)); err != nil {
 		return err
 	}
@@ -261,7 +266,7 @@ func (h *host) serveSend(path string) {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		name := safeName(r.URL.Query().Get("name"))
 		if r.Method != http.MethodPut || name == "" {
-			http.Error(w, "PUT /send?name=FILE with the file as the body", http.StatusBadRequest)
+			http.Error(w, "PUT /send?name=FILE[&print=1] with the file as the body", http.StatusBadRequest)
 			return
 		}
 		tmp, err := os.CreateTemp("", "nc-send-*")
@@ -276,6 +281,7 @@ func (h *host) serveSend(path string) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		hdr := fileHeader{Name: name, Size: size, Print: r.URL.Query().Get("print") == "1"}
 		var targets []*session
 		h.mu.Lock()
 		for _, s := range h.sessions {
@@ -299,9 +305,9 @@ func (h *host) serveSend(path string) {
 				body := io.NewSectionReader(tmp, 0, size)
 				var err error
 				if s.fileIn != nil { // the app's own channel, opened at connect
-					err = s.fileIn.send(ctx, name, body, size)
+					err = s.fileIn.send(ctx, hdr, body)
 				} else {
-					err = sendFile(ctx, s.pc, name, body, size)
+					err = sendFile(ctx, s.pc, hdr, body)
 				}
 				if err != nil {
 					log.Printf("send %s: %v", name, err)
@@ -316,8 +322,12 @@ func (h *host) serveSend(path string) {
 			http.Error(w, "the device did not take it", http.StatusBadGateway)
 			return
 		}
-		log.Printf("sent %s (%s) to %d device(s)", name, humanBytes(size), sent)
-		fmt.Fprintf(w, "sent %s to %d device(s)\n", name, sent)
+		verb := "sent"
+		if hdr.Print {
+			verb = "sent to print"
+		}
+		log.Printf("%s %s (%s) to %d device(s)", verb, name, humanBytes(size), sent)
+		fmt.Fprintf(w, "%s %s to %d device(s)\n", verb, name, sent)
 	})
 	http.Serve(l, mux)
 }

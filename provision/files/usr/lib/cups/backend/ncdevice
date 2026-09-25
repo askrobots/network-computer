@@ -1,0 +1,56 @@
+#!/bin/sh
+# CUPS backend for the "My device" printer: print on the device you are
+# connected from. CUPS hands it the job as a PDF (the queue's PPD asks for
+# one); it goes to nc-host's send socket with print=1, and the phone, iPad,
+# Mac or browser opens its own print dialog with it (AirPrint on iOS).
+# Nobody connected: the PDF is kept in ~/Documents/Printed and a notification
+# says so, rather than the job vanishing.
+#
+# Installed 0700 root so CUPS runs it as root (it needs the send socket and to
+# write into the desk user's home). Arguments: JOB USER TITLE COPIES OPTIONS [FILE].
+SOCK=${NC_SEND_SOCKET:-/run/nc-host/send.sock}
+if [ $# -eq 0 ]; then
+  echo 'direct ncdevice "Unknown" "Print on my device (network-computer)"'
+  exit 0
+fi
+[ $# -ge 5 ] || { echo "usage: ncdevice JOB USER TITLE COPIES OPTIONS [FILE]" >&2; exit 1; }
+TITLE=$3
+tell() { # a desktop notification in the desk user's session, if there is one
+  nc-as-user notify-send -i printer "My device" "$1" >/dev/null 2>&1 || true
+}
+
+# a file name from the job's title: "Welcome.txt" -> "Welcome.pdf"
+base=$(basename "$TITLE" 2>/dev/null | sed 's/\.[A-Za-z0-9]\{1,5\}$//; s/[^A-Za-z0-9 ._()-]/_/g; s/^[ .]*//' | cut -c1-80)
+[ -n "$base" ] || base="print-$1"
+NAME="$base.pdf"
+
+TMP=$(mktemp /tmp/ncdevice-XXXXXX.pdf) || exit 1
+trap 'rm -f "$TMP"' EXIT
+if [ -n "$6" ]; then cat "$6" > "$TMP"; else cat > "$TMP"; fi
+[ -s "$TMP" ] || { echo "ERROR: empty job" >&2; exit 1; }
+
+Q=$(python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "$NAME")
+echo "INFO: sending $NAME to the connected device" >&2
+out=$(curl -sS --unix-socket "$SOCK" -T "$TMP" -w '\n%{http_code}' "http://desk/send?name=$Q&print=1" 2>&1)
+code=$(echo "$out" | tail -n 1)
+if [ "$code" = 200 ]; then
+  echo "INFO: $(echo "$out" | sed '$d')" >&2
+  tell "Printing $NAME on your device"
+  exit 0
+fi
+
+# not delivered: keep it for the desk user
+[ -r /etc/nc/env ] && . /etc/nc/env
+U=${NC_DESK_USER:-user}; H=$(getent passwd "$U" | cut -d: -f6)
+why=$(echo "$out" | sed '$d' | head -1); [ -n "$why" ] || why="nc-host is not running"
+if [ -n "$H" ] && [ -d "$H" ]; then
+  runuser -u "$U" -- mkdir -p "$H/Documents/Printed"
+  dest="$H/Documents/Printed/$NAME"; n=2
+  while [ -e "$dest" ]; do dest="$H/Documents/Printed/$base ($n).pdf"; n=$((n+1)); done
+  install -o "$U" -g "$(id -gn "$U")" -m 644 "$TMP" "$dest"
+  echo "WARNING: $why; saved $dest" >&2
+  tell "Not printed ($why). Saved as Documents/Printed/$(basename "$dest")"
+  exit 0
+fi
+echo "ERROR: $why" >&2
+exit 1

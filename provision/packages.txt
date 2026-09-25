@@ -43,3 +43,6 @@ zenity
 poppler-utils
 ocrmypdf
 tesseract-ocr
+# printing on the device you are connected from ("My device": CUPS + ncdevice)
+cups
+cups-filters

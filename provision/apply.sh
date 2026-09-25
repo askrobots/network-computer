@@ -204,6 +204,23 @@ if ! grep -q 'nc-send' "$UCA" 2>/dev/null; then
   awk '/<\/actions>/{print "<action><icon>document-send</icon><name>Send to my device</name><submenu></submenu><unique-id>nc-send</unique-id><command>nc-send %F</command><description>Download on the device you are connected from</description><range>*</range><patterns>*</patterns><other-files/><text-files/><image-files/><audio-files/><video-files/></action>"}{print}' "$UCA" > "$UCA.new" && mv "$UCA.new" "$UCA"
   chown "$NC_DESK_USER:$NC_DESK_USER" "$UCA"
 fi
+# ... and "Print on my device" for documents and pictures
+if ! grep -q 'nc-print' "$UCA" 2>/dev/null; then
+  awk '/<\/actions>/{print "<action><icon>printer</icon><name>Print on my device</name><submenu></submenu><unique-id>nc-print</unique-id><command>lp -d my-device %F</command><description>Opens the print dialog of the device you are connected from</description><range>*</range><patterns>*.pdf;*.PDF;*.txt;*.png;*.jpg;*.jpeg;*.PNG;*.JPG;*.JPEG</patterns><text-files/><image-files/><other-files/></action>"}{print}' "$UCA" > "$UCA.new" && mv "$UCA.new" "$UCA"
+  chown "$NC_DESK_USER:$NC_DESK_USER" "$UCA"
+fi
+
+echo ">> printing: \"My device\" prints on the device you are connected from"
+# CUPS (local only), a queue whose backend (ncdevice) hands each job as a PDF
+# to nc-host, and it is the default printer: File > Print in any app reaches
+# the phone's, iPad's or Mac's own print dialog.
+chmod 0700 /usr/lib/cups/backend/ncdevice   # root: needs the send socket
+systemctl enable --now cups.socket cups.service >/dev/null 2>&1 || true
+if ! lpstat -v my-device >/dev/null 2>&1; then
+  lpadmin -p my-device -E -v ncdevice:/ -P /usr/share/ppd/nc/my-device.ppd \
+    -D "My device" -L "the device you are connected from" -o printer-error-policy=abort-job
+fi
+lpadmin -d my-device
 echo ">> personal settings (from the profile; applied once, never over the user's own changes)"
 PERSON="$(dirname "$0")/person.env"
 if [ -f "$PERSON" ]; then
