@@ -38,6 +38,7 @@ type host struct {
 	audio               string
 	mic                 string
 	camera              string // v4l2loopback device for the client's camera ('' = ignore it)
+	video, sound        *hub   // one screen encoder and one sound encoder, shared by every device
 	cam                 camOwner
 	dryRun              bool
 	api                 *webrtc.API
@@ -46,8 +47,8 @@ type host struct {
 	pairs               *pairing
 	display             displayControl
 	filesDir            string
-	idleFile            string    // "busy N" or "idle-since UNIX", for auto-stop (next to the send socket)
-	inputFile           string    // input=touch|pointer, device=phone|tablet|desktop: for the apps and voice
+	idleFile            string // "busy N" or "idle-since UNIX", for auto-stop (next to the send socket)
+	inputFile           string // input=touch|pointer, device=phone|tablet|desktop: for the apps and voice
 	inputKind, device   string
 	idleSince           time.Time // when the last client left
 	voice               voiceRelay
@@ -95,7 +96,10 @@ func main() {
 		*pin = randomPIN()
 	}
 	log.Printf("host PIN: %s   (clients must enter this to connect)", *pin)
-	h := &host{name: *name, audio: *audio, mic: *mic, camera: *camera, dryRun: *dryRun, sessions: map[string]*session{}, user: *user, password: *password, pin: *pin, filesDir: *filesDir}
+	h := &host{video: newHub("video", true, streamVideo), name: *name, audio: *audio, mic: *mic, camera: *camera, dryRun: *dryRun, sessions: map[string]*session{}, user: *user, password: *password, pin: *pin, filesDir: *filesDir}
+	h.sound = newHub("sound", false, func(ctx context.Context, _ captureOpts, w sampleWriter, _ func()) {
+		streamAudio(ctx, h.audio, w)
+	})
 	if *sendSocket != "" {
 		go h.serveSend(*sendSocket)
 		h.idleFile = filepath.Join(filepath.Dir(*sendSocket), "idle")
@@ -322,7 +326,6 @@ func (h *host) handleOffer(ctx context.Context, m proto.Message) {
 		}
 	}
 
-	restartCapture := make(chan captureOpts, 1)
 	inj := h.injector()
 	clip := newClipSync()
 	pc.OnDataChannel(func(dc *webrtc.DataChannel) {
@@ -386,10 +389,7 @@ func (h *host) handleOffer(ctx context.Context, m proto.Message) {
 						opts := h.capture
 						opts.Width, opts.Height = req.W, req.H
 						opts.Bitrate = bitrateFor(h.capture.Bitrate, req.W, req.H)
-						select {
-						case restartCapture <- opts:
-						default: // a restart is already queued; the newer size follows
-						}
+						h.video.restart(opts) // the screen changed for every device
 					}
 				}()
 				return
@@ -426,25 +426,17 @@ func (h *host) handleOffer(ctx context.Context, m proto.Message) {
 					opts.Width, opts.Height = last.W, last.H
 					opts.Bitrate = bitrateFor(h.capture.Bitrate, last.W, last.H)
 				}
-				for {
-					cctx, ccancel := context.WithCancel(sctx)
-					done := make(chan struct{})
-					go func(o captureOpts) { streamVideo(cctx, o, video, nil); close(done) }(opts)
-					select {
-					case <-sctx.Done():
-						ccancel()
-						<-done
-						return
-					case opts = <-restartCapture:
-						ccancel()
-						<-done
-						log.Printf("[%s] capture restarting at %dx%d, %s", peer, opts.Width, opts.Height, opts.Bitrate)
-					}
+				leave := h.video.join(video, opts)
+				var leaveSound func()
+				if audioTrack != nil {
+					leaveSound = h.sound.join(audioTrack, opts)
+				}
+				<-sctx.Done()
+				leave()
+				if leaveSound != nil {
+					leaveSound()
 				}
 			}()
-			if audioTrack != nil {
-				go streamAudio(sctx, h.audio, audioTrack)
-			}
 		case webrtc.PeerConnectionStateFailed, webrtc.PeerConnectionStateClosed, webrtc.PeerConnectionStateDisconnected:
 			inj.ReleaseAll()
 			closeSession()
