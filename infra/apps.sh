@@ -60,14 +60,17 @@ $r
 EOF
       [ -f "$SRC/$dir/pubspec.yaml" ] || { echo "no source at $SRC/$dir"; exit 1; }
       echo ">> $title: copying the source to the build user"
-      ssh root@"$IP" "install -d -o ncbuild -g ncbuild /var/lib/ncbuild/src/$n"
-      rsync -a --delete --exclude .git/ --exclude build/ --exclude .dart_tool/ --exclude 'Pods/' \
-        --exclude .DS_Store --exclude '.env' --exclude '*.env' "$SRC/$dir/" root@"$IP":/var/lib/ncbuild/src/$n/
+      # the same layout as $SRC, so path dependencies (../dbbasic-app-kit) resolve
+      ssh root@"$IP" "install -d -o ncbuild -g ncbuild /var/lib/ncbuild/src/$dir /var/lib/ncbuild/src/dbbasic-app-kit"
+      X="--exclude .git/ --exclude build/ --exclude .dart_tool/ --exclude Pods/ --exclude .DS_Store --exclude .env --exclude *.env"
+      [ -f "$SRC/dbbasic-app-kit/pubspec.yaml" ] &&
+        rsync -a --delete $X "$SRC/dbbasic-app-kit/" root@"$IP":/var/lib/ncbuild/src/dbbasic-app-kit/
+      rsync -a --delete $X "$SRC/$dir/" root@"$IP":/var/lib/ncbuild/src/$dir/
       echo ">> $title: building (flutter build linux)"
-      ssh root@"$IP" N="$n" APPID="$appid" BIN="$bin" TITLE="\"$title\"" CATS="\"$cats\"" EXTS="\"$exts\"" \
+      ssh root@"$IP" N="$n" DIR="$dir" APPID="$appid" BIN="$bin" TITLE="\"$title\"" CATS="\"$cats\"" EXTS="\"$exts\"" \
         MIME="\"$mime\"" COMMENT="\"$comment\"" sh -s <<'EOF'
 set -e
-S=/var/lib/ncbuild/src/$N; chown -R ncbuild:ncbuild "$S"; cd "$S"
+S=/var/lib/ncbuild/src/$DIR; chown -R ncbuild:ncbuild /var/lib/ncbuild/src; cd "$S"
 [ -d linux ] || runuser -u ncbuild -- sh -c 'PATH=/opt/flutter/bin:$PATH flutter create --platforms=linux . >/dev/null'
 # its own identity on Linux: apps copied from Writer still carry Writer's,
 # and GTK would hand a second app with the same id to the first one's window

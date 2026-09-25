@@ -44,6 +44,37 @@ document (its first heading when it has one, otherwise a 2 to 4 word name from
 the AI). The other AI apps (Shell, Draw, Scroll) still read their own places and
 move over as they are touched.
 
+## Driving the apps: voice and scripts
+
+Each dbbasic app built on the shared kit (`dbbasic_app_kit`, private) listens on
+a control socket, only for the desk user:
+`$XDG_RUNTIME_DIR/dbbasic/APP-PID.sock` (folder 0700, socket 0600; on a desk
+`/run/nc-desktop/dbbasic/`). One JSON line in, one out. `describe` lists the
+app's actions and state; every action says what it can do: `read`, `edit` (the
+open document; undo brings it back), `file` (opens or writes a file), or
+`destructive` (can lose work).
+
+```sh
+nc-desk apps                                              # what is running, what each can do
+nc-desk app writer insert_text '{"text": "# Notes\n\nFirst point"}'
+nc-desk app writer select_text '{"text": "First point"}'
+nc-desk app writer format '{"style": "bold"}'
+nc-desk app writer save_as '{"path": "~/Objects/Notes"}'   # .dbw added; never overwrites unasked
+```
+
+Voice sees the running apps and their actions in its desktop context and uses
+them instead of screenshots and clicks ("write my landlord a thank-you note in
+Writer and save it" is three actions: new_document, insert_text, save_as).
+Approval follows the effect: read and edit run; file actions get the second-model
+review; anything destructive, `overwrite`, or `discard` with unsaved changes is
+asked of the user. File paths stay inside home and outside hidden folders.
+
+Writer's actions: get_text, get_selection, insert_text (blank lines = paragraphs,
+`# ` headings, `- ` bullets; always escaped), replace_selection, select_text,
+format (bold, italic, underline, heading1-3, paragraph, bullets, numbers,
+left/center/right/justify), find, suggest_name, new_document, open, save,
+save_as. The other apps get theirs as they move onto the kit.
+
 ## Getting the apps onto a desk
 
 ```sh

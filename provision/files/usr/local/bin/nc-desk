@@ -25,6 +25,9 @@ Files (only inside the home folder; never overwrites; Trash can be undone)
   nc-desk move SRC... DEST                 DEST: a folder, or a new name for one SRC
   nc-desk copy SRC... DEST
   nc-desk trash PATH...
+Apps (the dbbasic apps, driven by name through their control socket)
+  nc-desk apps                             running dbbasic apps: their actions and state
+  nc-desk app NAME ACTION [JSON-ARGS]      nc-desk app writer insert_text '{"text": "Hi"}'
 
 WINDOW is part of a window's title or class, case-insensitive ("firefox",
 "Mousepad"), or an id from `nc-desk windows`.
@@ -293,6 +296,69 @@ def trash(*paths):
     return {"trashed": done, "undo": "restore from the Trash"}
 
 
+# ---------- the dbbasic apps' control sockets (dbbasic_app_kit AppControl) ----------
+
+def app_sockets():
+    """name -> socket path, the newest process of each app first."""
+    uid = os.getuid()
+    dirs = [os.path.join(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{uid}"), "dbbasic"),
+            f"/run/user/{uid}/dbbasic", f"/tmp/dbbasic-{os.environ.get('USER', '')}"]
+    found = {}
+    for d in dict.fromkeys(dirs):
+        try:
+            names = os.listdir(d)
+        except OSError:
+            continue
+        for n in names:
+            m = re.fullmatch(r"([a-z][a-z0-9_-]*)-(\d+)\.sock", n)
+            if m and os.path.exists(f"/proc/{m.group(2)}"):
+                found.setdefault(m.group(1), []).append((int(m.group(2)), os.path.join(d, n)))
+    return {k: [p for _, p in sorted(v, reverse=True)] for k, v in found.items()}
+
+
+def app_request(path, action, args=None, timeout=20):
+    import socket
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as c:
+        c.settimeout(timeout)
+        c.connect(path)
+        c.sendall((json.dumps({"action": action, "args": args or {}}) + "\n").encode())
+        data = b""
+        while not data.endswith(b"\n"):
+            chunk = c.recv(65536)
+            if not chunk:
+                break
+            data += chunk
+    return json.loads(data.decode() or "{}")
+
+
+def apps():
+    out = []
+    for name, paths in sorted(app_sockets().items()):
+        try:
+            r = app_request(paths[0], "describe", timeout=5)
+            if r.get("ok"):
+                out.append(r["result"])
+        except (OSError, ValueError):
+            pass
+    return {"apps": out}
+
+
+def app(name, action, args="{}"):
+    paths = app_sockets().get(name.lower())
+    if not paths:
+        raise Fail(f"{name} is not running (or has no control); open it first")
+    try:
+        parsed = json.loads(args)
+    except ValueError:
+        raise Fail("JSON-ARGS must be a JSON object")
+    if not isinstance(parsed, dict):
+        raise Fail("JSON-ARGS must be a JSON object")
+    r = app_request(paths[0], action, parsed)
+    if not r.get("ok"):
+        raise Fail(r.get("error") or f"{name} refused {action}")
+    return {"app": name, "action": action, "result": r.get("result")}
+
+
 COMMANDS = {
     "windows": lambda: {"windows": windows()},
     "arrange": arrange,
@@ -303,6 +369,7 @@ COMMANDS = {
     "screen": lambda: dict(zip(("w", "h"), screen_size()), work_area=work_area()),
     "screenshot": screenshot,
     "ls": ls, "mkdir": mkdir, "move": move, "copy": copy, "trash": trash,
+    "apps": apps, "app": app,
 }
 
 

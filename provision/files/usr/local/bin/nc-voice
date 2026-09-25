@@ -335,6 +335,14 @@ def act(a, scale=None):
             return f"switched to {APPS[app]} (already open)"
         launch(app)
         return f"opened {APPS[app]}"
+    if kind == "app":
+        name, action = str(a.get("app", "")).lower(), str(a.get("action", ""))
+        args = a.get("args") if isinstance(a.get("args"), dict) else {}
+        r = nc_desk("app", name, action, json.dumps(args), timeout=60)
+        result = r.get("result")
+        shown = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
+        # get_text can be long: the model gets up to 8000 characters
+        return f"{name} {action}: {shown[:8000]}"
     if kind == "switch":
         w = a.get("window", "")
         if desk("wmctrl", "-a", w).returncode == 0:
@@ -478,6 +486,13 @@ Actions, done in order:
   {"do": "set_style", "text": "..."}   when they tell you how to talk ("be more brief",
                    "less cheerful", "call me Dan"): the COMPLETE new style, keeping their
                    earlier wishes unless they change them; "" resets to the default
+  {"do": "app", "app": "writer", "action": "insert_text", "args": {"text": "..."}}
+                   drive a dbbasic app (Writer, Spreadsheet...) by name; the running ones and
+                   their actions are listed in "apps" below. Prefer this to clicking and typing
+                   in them: it is exact and needs no screenshot. Open one first with open_app.
+                   Writer: write a whole letter or text with one insert_text (blank lines between
+                   paragraphs, "# " for a heading); save a new document with save_as, into
+                   ~/Objects/<a short name>.dbw unless they say where (suggest_name gives one).
   {"do": "look"}   to get a screenshot of the screen as it is (after your other actions)
 Seeing: the window list gives only titles, never contents. To read or describe what is in
 a window, or to click something, you need a screenshot: add look. Mouse coordinates are
@@ -570,13 +585,37 @@ def style():
                     "the JSON format still applies):\n" + t
 
 
+APP_EFFECTS = {}   # (app, action) -> read|edit|file|destructive, from the last describe
+APP_STATE = {}     # app -> its state from the last describe (unsaved_changes...)
+
+
+def running_apps():
+    """The dbbasic apps running now, compact: name, state, action(params)."""
+    try:
+        r = nc_desk("apps", timeout=10)
+    except Exception:
+        return ""
+    out = []
+    for a in (r.get("apps") or [])[:6]:
+        APP_STATE[a.get("app")] = a.get("state") or {}
+        acts = []
+        for x in a.get("actions") or []:
+            APP_EFFECTS[(a.get("app"), x.get("name"))] = x.get("effect")
+            ps = ",".join((x.get("params") or {}).keys())
+            acts.append(f"{x.get('name')}({ps})")
+        out.append(f"{a.get('app')} {json.dumps(a.get('state') or {})}: {' '.join(acts)}")
+    return " | ".join(out)
+
+
 def context():
     """What changes between turns, kept small: it rides on every message."""
     time.tzset()   # the desk's zone follows the client's (set at connect)
     rs = reminders()
     pending = "; ".join(f"{r['at']} {r['text']}" for r in rs[:8])
+    running = running_apps()
     return (f"[Desktop right now: open windows {json.dumps(open_windows())}; "
             f"time {time.strftime('%A %Y-%m-%d %H:%M %Z')}"
+            + (f"; apps: {running}" if running else "")
             + (f"; reminders: {pending}" if pending else "") + "]")
 
 
@@ -604,7 +643,7 @@ SAFE = {"open_app", "switch", "close", "arrange", "open", "search", "look", "ls"
         "cancel_reminder"}
 REVIEW = {"click", "drag", "type", "keys"}
 ASK = {"trash"}
-REVIEW_MODEL = os.environ.get("NC_VOICE_REVIEW_MODEL", "anthropic:claude-haiku-4-5")
+REVIEW_MODEL = os.environ.get("NC_VOICE_REVIEW_MODEL", "anthropic:claude-sonnet-5")
 REVIEWER = """You check one action a voice assistant is about to take on a user's Linux
 desktop, before it happens. Reply with ONLY JSON: {"verdict": "ok|ask|no", "reason": "..."}.
 ok: plainly what the user asked for, or a harmless step toward it.
@@ -639,6 +678,9 @@ def describe(a):
         return "move to Trash: " + ", ".join(a.get("paths") or [])
     if kind == "open":
         return f"open {a.get('target', '')}"
+    if kind == "app":
+        args = json.dumps(a.get("args") or {}, ensure_ascii=False)
+        return f"{a.get('app')}: {a.get('action')} {args[:120]}"
     return json.dumps(a)
 
 
@@ -767,6 +809,21 @@ class Voice:
         kind = a.get("do")
         if kind == "open" and runs_something(a.get("target", "")):
             return "ask", "it would run a program"
+        if kind == "app":
+            # the app says what each action can do (dbbasic_app_kit ActionEffect):
+            # reading and editing the open document run (undo brings an edit
+            # back); writing or opening files gets the review; anything that
+            # can lose work, or asks to overwrite or discard, is asked
+            args = a.get("args") if isinstance(a.get("args"), dict) else {}
+            name = str(a.get("app", "")).lower()
+            effect = APP_EFFECTS.get((name, a.get("action")))
+            unsaved = bool(APP_STATE.get(name, {}).get("unsaved_changes"))
+            if effect == "destructive" or args.get("overwrite") in (True, "true") \
+                    or (args.get("discard") in (True, "true") and unsaved):
+                return "ask", "it could replace or lose work"
+            if effect in ("read", "edit"):
+                return "run", ""
+            kind = "type"   # file actions, and any the app did not describe: reviewed
         if kind in SAFE:
             return "run", ""
         if kind in ASK:
@@ -831,7 +888,7 @@ class Voice:
                     continue
                 try:
                     done = act(a, scale)
-                    event("did", done)
+                    event("did", done if len(done) <= 300 else done[:300] + "…")   # the model gets it all
                     self.obj.log_action(text, done)
                     results.append(done)
                 except Exception as e:
@@ -881,7 +938,7 @@ class Voice:
                         break
                 try:
                     done = act(a, p["scale"])
-                    event("did", done)
+                    event("did", done if len(done) <= 300 else done[:300] + "…")   # the model gets it all
                     self.obj.log_action(p["request"], done + " (you said yes)")
                 except Exception as e:
                     event("error", str(e))
