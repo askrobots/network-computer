@@ -2,7 +2,7 @@
 # Keep this desk's services running: anything stopped or failed (for example,
 # after systemd gave up restarting it) is reset and started again. Run every
 # few minutes by nc-health.timer; needs no cloud token. Logs to the journal.
-for s in nc-xorg nc-desktop nc-audio nc-rendezvous nc-host nc-object-server nc-object-daemon nc-voice; do
+for s in nc-xorg nc-desktop nc-audio nc-rendezvous nc-host nc-object-server nc-object-daemon nc-voice nc-object-files; do
   systemctl cat "$s" >/dev/null 2>&1 || continue          # not on this desk
   systemctl is-enabled --quiet "$s" 2>/dev/null || continue
   if ! systemctl is-active --quiet "$s"; then
@@ -11,3 +11,8 @@ for s in nc-xorg nc-desktop nc-audio nc-rendezvous nc-host nc-object-server nc-o
     systemctl restart "$s"
   fi
 done
+# ~/Objects can be "active" with the mount gone (davfs2 exited): mount it again
+if systemctl is-enabled --quiet nc-object-files 2>/dev/null && ! nc-object-files status >/dev/null 2>&1; then
+  echo "nc-health: ~/Objects was not mounted, remounting"
+  systemctl restart nc-object-files
+fi

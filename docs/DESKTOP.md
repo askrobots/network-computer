@@ -49,9 +49,10 @@ Three layers, each a step further:
     client tunnels it over the existing connection.
   - Device to desk: a folder on the Mac appears on the desk (drive redirection), mounted
     there with `rclone`/`davfs2` over the same tunnel.
-- **The object server as the home for files:** files live in the object server (permissioned,
-  versioned, backed up, and not tied to a region), and every desk mounts them and every
-  client sees them. The desk volume then holds only settings and secrets, which fits hot
+- **The object server as the home for files (first part works, 2026-09-25):** files live
+  in the object server (permissioned, backed up, and not tied to a region), and every
+  desk mounts them and every client sees them. The desk now mounts them as `~/Objects`;
+  see "The object server as part of the desktop" below. The desk volume then holds only settings and secrets, which fits hot
   desking and the object server front door (DESKS.md): sit down anywhere, your files are
   already there, the same permission engine decides what the AI may see.
 
@@ -211,6 +212,21 @@ itself, only when needed.
   (`nc-object-daemon`) turns record changes into notifications (app-notify); nc-voice
   shows each new one once, bottom right (top right is where browser tabs are), and
   clicking Open goes to its page.
+- **Its files are a folder: `~/Objects` (2026-09-25).** The object server serves your
+  files over WebDAV (`/dav/files/`, in the object server itself, so any desktop can
+  mount it), and the desk mounts that with davfs2 (`nc-object-files.service`). Every app,
+  the terminal, file dialogs and voice see plain files; saving, copying, renaming and
+  deleting there changes the records the Files app shows, through the same quota and
+  permission checks. It is in the file manager's side pane and on the desktop (Objects).
+  - It signs in with an API key minted for the desk user by `nc-object-bootstrap`, kept
+    root-only on the desk volume (`/desk/nc/davfs2.secrets`), reused by a new computer and
+    minted again only if it stops working.
+  - One flat folder: the object server's files have no folders yet, so making one is
+    refused, and two files with the same name show as `name (2).ext`.
+  - Free space is the object server's files quota (100 MB unless set), not the disk.
+  - `lost+found` inside it is davfs2's own (local, for uploads it could not finish).
+  - No locks yet, so a Mac's Finder would mount it read-only; davfs2 runs without them.
+  - `nc-health` remounts it if it drops; verify checks it.
 - Installed packages: theme, views, nav, shell, files, projects, collab, notes, tasks,
   notify.
 

@@ -1,0 +1,31 @@
+#!/bin/sh
+# The object server's files as a folder: ~/Objects on this desk, mounted over
+# WebDAV (the object server's /dav/files/) with davfs2, so every app, the
+# terminal and voice see them as plain files. Run by nc-object-files.service.
+#
+#   nc-object-files mount | umount | status
+#
+# Signs in with an API key minted for the desk user by nc-object-bootstrap and
+# kept root-only in /etc/nc/davfs2.secrets (on the desk volume when there is
+# one). The object server has no locks, hence use_locks 0 in davfs2.conf.
+. /etc/nc/env
+U=$NC_DESK_USER
+M=$(getent passwd "$U" | cut -d: -f6)/Objects
+URL=http://127.0.0.1:8001/dav/files/
+case "$1" in
+  mount)
+    mountpoint -q "$M" && exit 0
+    [ -s /etc/nc/davfs2.secrets ] || { echo "no /etc/nc/davfs2.secrets (run nc-object-bootstrap)"; exit 1; }
+    install -d -o "$U" -g "$U" "$M"
+    # uid/gid: the files are the desk user's; 0600/0700 like the rest of home
+    exec mount -t davfs "$URL" "$M" \
+      -o uid="$U",gid="$U",file_mode=0600,dir_mode=0700,conf=/etc/nc/davfs2.conf ;;
+  umount)
+    mountpoint -q "$M" || exit 0
+    # davfs2 uploads what is still in its cache before it lets go
+    exec umount "$M" ;;
+  status)
+    mountpoint -q "$M" && ls "$M" >/dev/null 2>&1 && echo "mounted at $M" && exit 0
+    echo "not mounted"; exit 1 ;;
+  *) echo "usage: nc-object-files mount|umount|status"; exit 2 ;;
+esac

@@ -282,7 +282,7 @@ oset DBBASIC_OBJECTS_DIR "$OSDATA/objects"
 oset DBBASIC_PACKAGES_DIR "$OS/packages"
 oset NC_DESK_USER "$NC_DESK_USER"
 for f in ENABLE_AI_CHAT ENABLE_TTS ENABLE_STT ENABLE_READER ENABLE_SITE_ROUTES ENABLE_PACKAGE_INSTALLS ENABLE_USER_FILES \
-         ENABLE_PASSWORD_LOGIN ENABLE_PERMISSION_ENFORCEMENT; do oset DBBASIC_$f true; done
+         ENABLE_PASSWORD_LOGIN ENABLE_PERMISSION_ENFORCEMENT ENABLE_WEBDAV; do oset DBBASIC_$f true; done
 oset DBBASIC_COOKIE_SECURE false
 chmod 600 "$(readlink -f $OSENV)"   # root only: systemd reads it before switching to the user
 echo ">> Piper (local text to speech for nc-voice)"
@@ -296,7 +296,7 @@ for s in nc-object-server nc-object-daemon nc-voice; do
 done
 
 # services that read the desk wait for it at boot
-for s in nc-desktop nc-host nc-rendezvous nc-object-server nc-object-daemon nc-voice; do
+for s in nc-desktop nc-host nc-rendezvous nc-object-server nc-object-daemon nc-voice nc-object-files; do
   install -d /etc/systemd/system/$s.service.d
   if [ -n "$DESK" ]; then
     printf '[Unit]\nRequiresMountsFor=/desk\n' > /etc/systemd/system/$s.service.d/desk.conf
@@ -334,6 +334,9 @@ systemctl enable --now nc-xorg nc-desktop nc-audio nc-rendezvous nc-host nc-obje
 sleep 4
 systemctl is-active nc-xorg nc-desktop nc-audio nc-rendezvous nc-host nc-object-server nc-object-daemon nc-voice | paste -sd' ' -
 nc-object-bootstrap || echo "!! object server bootstrap failed"
+# the object server's files as ~/Objects (needs the key the bootstrap minted)
+systemctl enable nc-object-files >/dev/null 2>&1
+systemctl restart nc-object-files && nc-object-files status | sed 's/^/   ~\/Objects: /' || echo "!! ~/Objects did not mount"
 systemctl enable --now nc-health.timer >/dev/null 2>&1   # restarts anything that stops
 # session settings (Alt+Space...) apply at every login; apply them to the running session now
 for i in 1 2 3 4 5; do nc-session-setup >/dev/null 2>&1 && break; sleep 2; done

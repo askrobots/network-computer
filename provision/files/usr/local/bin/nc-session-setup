@@ -19,6 +19,15 @@ if [ ! -e "$L" ] && [ ! -e "$HOME/.config/nc/object-icon-placed" ]; then
   mkdir -p "$HOME/.config/nc" && touch "$HOME/.config/nc/object-icon-placed"
 fi
 
+# ~/Objects (the object server's files, nc-object-files): in the file manager's
+# side pane always, and on the desktop once, as a link the user may delete
+O="$HOME/Objects"; B="$HOME/.config/gtk-3.0/bookmarks"
+mkdir -p "$(dirname "$B")"
+grep -qs "^file://$O " "$B" || echo "file://$O Objects" >> "$B"
+if [ ! -e "$D/Objects" ] && [ ! -e "$HOME/.config/nc/objects-link-placed" ]; then
+  ln -s "$O" "$D/Objects" && mkdir -p "$HOME/.config/nc" && touch "$HOME/.config/nc/objects-link-placed"
+fi
+
 # notifications bottom right: top right is where browser tabs and window buttons are
 xfconf-query -c xfce4-notifyd -p /notify-location -n -t int -s 3 2>/dev/null || xfconf-query -c xfce4-notifyd -p /notify-location -s 3
 

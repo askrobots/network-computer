@@ -1,0 +1,14 @@
+[Unit]
+Description=network-computer: the object server's files as ~/Objects
+After=nc-object-server.service
+# Wants, not Requires: restarting the object server must not unmount a folder
+# apps have files open in; davfs2 waits out a short outage by itself
+Wants=nc-object-server.service
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStartPre=/bin/sh -c 'for i in $(seq 60); do curl -sf http://127.0.0.1:8001/health >/dev/null && exit 0; sleep 1; done; exit 1'
+ExecStart=/usr/local/bin/nc-object-files mount
+ExecStop=/usr/local/bin/nc-object-files umount
+[Install]
+WantedBy=multi-user.target

@@ -39,6 +39,34 @@ for p in app-theme app-views app-nav app-shell app-files app-projects app-collab
   echo "   package $p: $code"
 done
 
+# the key ~/Objects signs in with (nc-object-files): minted once and kept
+# root-only, on the desk volume when there is one so a new computer reuses it;
+# minted again only when it stops working (revoked, or a fresh data dir).
+# Passed to curl on stdin, never on a command line or printed.
+DAVSEC=/etc/nc/davfs2.secrets; DAVURL=http://127.0.0.1:8001/dav/files/
+if [ -d /desk/nc ]; then
+  [ -e /desk/nc/davfs2.secrets ] || { [ -f $DAVSEC ] && [ ! -L $DAVSEC ] && mv $DAVSEC /desk/nc/davfs2.secrets; } || true
+  ln -sfn /desk/nc/davfs2.secrets $DAVSEC
+fi
+davok() {
+  [ -s $DAVSEC ] || return 1
+  code=$(awk -v u="$U" '{printf "user = \"%s:%s\"\n", u, $3}' $DAVSEC |
+         curl -s -o /dev/null -w '%{http_code}' -K - -X PROPFIND -H 'Depth: 0' $DAVURL)
+  [ "$code" = 207 ]
+}
+if ! davok; then
+  KEY=$(curl -s -X POST -H "Authorization: Token $DBBASIC_ADMIN_TOKEN" -H 'Content-Type: application/json' \
+          -d '{"name":"desk folder (~/Objects)"}' "http://127.0.0.1:8001/identity/users/$U/api-keys" |
+        "$PY" -c 'import json,sys; print(json.load(sys.stdin).get("token",""))')
+  if [ -n "$KEY" ]; then
+    (umask 077; printf '%s %s %s\n' "$DAVURL" "$U" "$KEY" > "$(readlink -f $DAVSEC)")
+    davok && echo "   ~/Objects key minted" || echo "   !! ~/Objects key minted but refused (is DBBASIC_ENABLE_WEBDAV on?)"
+  else
+    echo "   !! could not mint the ~/Objects key"
+  fi
+  unset KEY
+fi
+
 # the voice style from the profile, only if the user hasn't set one
 if [ -s /etc/nc/voice-style.initial ]; then
   T=$(curl -s -X POST -H "Authorization: Token $DBBASIC_ADMIN_TOKEN" -H "Content-Type: application/json" \

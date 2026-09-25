@@ -35,3 +35,5 @@ espeak-ng
 python3-venv
 conky-std
 gir1.2-webkit2-4.1
+# the object server's files as ~/Objects (WebDAV)
+davfs2

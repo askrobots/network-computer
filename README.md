@@ -35,6 +35,10 @@ and files. See [docs/PLAN.md](docs/PLAN.md) for the design,
 - **Files both ways:** drop files on the window and they land on the desk's Desktop. On
   the desk, right-click a file → **Send to my device** (or `nc-send FILE`) and a 📥 button
   appears in the page to save it.
+- **Your object server files as a folder:** `~/Objects` on the desk is your files in the
+  [DBBASIC object server](https://github.com/askrobots/dbbasic-object-server), mounted
+  over its WebDAV, so every app and the terminal use them as ordinary files. See
+  [docs/DESKTOP.md](docs/DESKTOP.md).
 - **Search, launch and talk:** Alt+Space (or 🔍) searches open windows, apps and files.
   The 🎙️ button talks to the desk and can operate it: arrange windows, click what it
   sees, move files, read web pages; risky steps get a second AI check, and deleting asks
@@ -53,7 +57,7 @@ and files. See [docs/PLAN.md](docs/PLAN.md) for the design,
   prints the message to send them. See [docs/DESKS.md](docs/DESKS.md).
 - **One-command desk on DigitalOcean:** `infra/droplet.sh up` builds a provisioned
   Ubuntu desktop (Xfce, Firefox, VLC, Audacity, the tools above) with its DNS name,
-  checked by 59 automated checks; `infra/droplet.sh down` destroys it and keeps the desk.
+  checked by 65 automated checks; `infra/droplet.sh down` destroys it and keeps the desk.
 
 ### Clients
 

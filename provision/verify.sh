@@ -44,6 +44,9 @@ check "self-check timer (nc-health) active" systemctl is-active --quiet nc-healt
 check "desktop dashboard running (conky)"  pgrep -x conky
 check "object server app windows (WebKitGTK)" python3 -c "import gi; gi.require_version(\"WebKit2\", \"4.1\"); from gi.repository import WebKit2"
 check "object server daemon (notifications)" systemctl is-active --quiet nc-object-daemon
+check "object server files as ~/Objects (WebDAV)" nc-object-files status
+check "~/Objects key is root-only"          sh -c 'test "$(stat -L -c %U:%a /etc/nc/davfs2.secrets)" = root:600'
+check "/dav/ refuses a request without a key" sh -c 'curl -s -o /dev/null -w "%{http_code}" -X PROPFIND http://127.0.0.1:8001/dav/files/ | grep -qx 401'
 check "ALSA apps record from pulse"      sh -c 'timeout 5 arecord -q -D default -d 1 -f S16_LE -r 48000 -c 2 /dev/null'
 check "pavucontrol installed"            command -v pavucontrol
 check "no pulse autospawn override"      sh -c '! test -e /etc/pulse/client.conf.d/01-enable-autospawn.conf'
