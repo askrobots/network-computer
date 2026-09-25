@@ -33,7 +33,13 @@ for m in "$ROOT"/*/nc-app.env; do
   echo "$NAME" | grep -Eq '^[a-z][a-z0-9-]*$' || { echo "skipping $m: bad NAME"; continue; }
   dir="$ROOT/$NAME"
   [ -x "$dir/$BINARY" ] || { echo "skipping $NAME: no $dir/$BINARY"; continue; }
-  ln -sfn "$dir/$BINARY" "/usr/local/bin/dbbasic-$NAME"
+  # the command every way of starting it goes through (menu, desktop icon,
+  # double-click, voice, a terminal). WebKitGTK's DMA-BUF renderer draws
+  # nothing on a computer without a GPU (a cloud desk): the editors' pages
+  # were blank while typing still worked (2026-09-25)
+  rm -f "/usr/local/bin/dbbasic-$NAME"
+  printf '#!/bin/sh\n# written by nc-apps\nexport WEBKIT_DISABLE_DMABUF_RENDERER=1\nexec %s "$@"\n' "'$dir/$BINARY'" > "/usr/local/bin/dbbasic-$NAME"
+  chmod 755 "/usr/local/bin/dbbasic-$NAME"
   if [ -n "$ICON" ] && [ -f "$dir/$ICON" ]; then
     install -Dm644 "$dir/$ICON" "/usr/share/icons/hicolor/512x512/apps/dbbasic-$NAME.png"
   fi
@@ -50,7 +56,7 @@ for m in "$ROOT"/*/nc-app.env; do
 Type=Application
 Name=$TITLE
 Comment=$COMMENT
-Exec=$dir/$BINARY %f
+Exec=/usr/local/bin/dbbasic-$NAME %f
 Icon=dbbasic-$NAME
 Categories=$CATEGORIES
 StartupWMClass=$BINARY

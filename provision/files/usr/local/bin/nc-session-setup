@@ -26,6 +26,11 @@ fi
 for f in /usr/share/applications/dbbasic-*.desktop; do
   [ -f "$f" ] || continue
   n=$(basename "$f" .desktop); mark="$HOME/.config/nc/placed-$n"
+  # a copy placed before the apps had launchers: bring its command up to date
+  if [ -e "$D/$n.desktop" ] && grep -q '^Exec=/desk/apps/' "$D/$n.desktop"; then
+    sed -i "s|^Exec=.*|$(grep '^Exec=' "$f")|" "$D/$n.desktop"
+    gio set -t string "$D/$n.desktop" metadata::xfce-exe-checksum "$(sha256sum "$D/$n.desktop" | cut -d' ' -f1)" 2>/dev/null
+  fi
   [ -e "$mark" ] && continue
   cp "$f" "$D/$n.desktop" && chmod +x "$D/$n.desktop" &&
     gio set -t string "$D/$n.desktop" metadata::xfce-exe-checksum "$(sha256sum "$D/$n.desktop" | cut -d' ' -f1)" 2>/dev/null
