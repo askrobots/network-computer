@@ -78,7 +78,9 @@ S=/var/lib/ncbuild/src/$DIR; chown -R ncbuild:ncbuild /var/lib/ncbuild/src; cd "
 sed -i "s|^set(BINARY_NAME .*|set(BINARY_NAME \"$BIN\")|; s|^set(APPLICATION_ID .*|set(APPLICATION_ID \"$APPID\")|" linux/CMakeLists.txt
 # and its name on the window, not the Dart project name
 sed -i -E "s/(gtk_header_bar_set_title\(header_bar, |gtk_window_set_title\(window, )\"[^\"]*\"/\1\"$TITLE\"/" linux/runner/my_application.cc
-runuser -u ncbuild -- sh -c 'export PATH=/opt/flutter/bin:$PATH; flutter pub get >/dev/null && flutter build linux --release 2>&1 | tail -15'
+# the whole icon font: an incremental build kept the first build's cut-down
+# font, so icons added later drew as blanks (2026-09-25)
+runuser -u ncbuild -- sh -c 'export PATH=/opt/flutter/bin:$PATH; flutter pub get >/dev/null && flutter build linux --release --no-tree-shake-icons 2>&1 | tail -15'
 B=$S/build/linux/x64/release/bundle
 [ -x "$B/$BIN" ] || { echo "!! build produced no $BIN"; exit 1; }
 ROOT=/desk/apps; [ -d /desk/nc ] || ROOT=/opt/dbbasic
