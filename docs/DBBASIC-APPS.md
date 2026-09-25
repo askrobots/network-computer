@@ -73,7 +73,25 @@ Writer's actions: get_text, get_selection, insert_text (blank lines = paragraphs
 `# ` headings, `- ` bullets; always escaped), replace_selection, select_text,
 format (bold, italic, underline, heading1-3, paragraph, bullets, numbers,
 left/center/right/justify), find, suggest_name, new_document, open, save,
-save_as. The other apps get theirs as they move onto the kit.
+save_as.
+
+Spreadsheet's (files `.dbs`): get_cells (a range as rows; formulas on request),
+set_cells (`{"A1": "Rent", "B5": "=SUM(B2:B4)"}`), fill (a whole table from a
+cell), clear, add_rows, add_columns, new_sheet, open, save, save_as, export_csv.
+
+Slides' (files `.dbp`): list_slides, get_slide, add_slide (title, body with
+`- ` bullets, where), set_slide, move_slide, delete_slide (asked first),
+show_slide, mode (present/edit), open, save, save_as.
+
+Draw, Shell, Webmaster and Porter get theirs as they move onto the kit.
+
+## Phone, tablet or desktop
+
+The client says what it is (phone, tablet or desktop; touch or pointer) and
+the desk's host writes it to `/run/nc-host/input`. The apps read it through
+the kit (`InputMode`): 48 px targets for a finger, and on a phone Spreadsheet
+and Slides hide the text-formatting row so the sheet or slide gets the room.
+The desk itself follows too (`nc-device`, see DESKTOP.md).
 
 ## Getting the apps onto a desk
 
@@ -109,14 +127,12 @@ infra/apps.sh build writer shell     # build and install (see: infra/apps.sh lis
 | App | Command | Notes |
 |---|---|---|
 | Writer | `dbbasic-writer` | `.dbw` opens in it; suggests a file name on save (heading, else AI) |
-| Spreadsheet | `dbbasic-spreadsheet` | |
-| Slides | `dbbasic-slides` | |
+| Spreadsheet | `dbbasic-spreadsheet` | `.dbs`; voice/script control |
+| Slides | `dbbasic-slides` | `.dbp`; voice/script control |
 | Shell | `dbbasic-shell` | AI terminal; keys from `ai.env`, Sonnet 5 |
 | Webmaster | `dbbasic-webmaster` | as it was; the object server can make it simpler later |
 | Porter | `dbbasic-porter` | format converter |
 | Draw | `dbbasic-draw` | first Linux build; its OpenAI key is still its own setting |
 
-Known gaps: Spreadsheet and Slides still save as Writer's `.dbw` (they began as
-its copy) and have no file type of their own yet; Draw does not read `ai.env`
-yet; builds reach only the desk `infra/apps.sh` points at (other people's desks
+Known gaps: Draw does not read `ai.env` yet; builds reach only the desk `infra/apps.sh` points at (other people's desks
 need their own build or a copy of `/desk/apps`).

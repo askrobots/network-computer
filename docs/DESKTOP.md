@@ -230,6 +230,26 @@ itself, only when needed.
 - Installed packages: theme, views, nav, shell, files, projects, collab, notes, tasks,
   notify.
 
+## The desk follows the device (2026-09-25)
+
+A phone, a tablet and a desktop want different things from the same desk, which
+may be why Apple kept iPadOS and macOS apart. The client reports what it is
+(the browser by screen size and pointer, the app by size and platform) and
+`nc-device`, in the session, lays the desk out for it:
+
+| | Desktop | Tablet | Phone |
+|---|---|---|---|
+| Panel / dock | yours | 40 / 64 px | 44 / 64 px |
+| Window title bars | yours | hdpi (bigger buttons) | xhdpi |
+| Text | yours | +2 pt | +3 pt |
+| Launcher (Alt+Space, 🔍) | 44% wide | 70%, bigger rows | full screen, big rows |
+| Windows | as they are | as they are | maximized, new ones too |
+
+Your desktop settings are saved each time you leave the desktop and restored
+when you come back. Voice sees the device ("device: phone (touch)") and can set
+a layout ("set this up for my phone"); that choice holds until you connect from
+a different kind of device. The dbbasic apps follow the same signal.
+
 ## 5. Your session comes back
 
 Windows, terminal sessions (`tmux` on the desk) and Firefox tabs restored after a rebuild,
