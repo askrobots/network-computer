@@ -55,6 +55,12 @@ into volumes by lifecycle, and a controller that stops idle desks and wakes them
 schedule or AI task. What companies, travelers and salespeople need from it, with hourly
 costs: [DESKS.md](DESKS.md).
 
+## 8. Remote support: a person or an AI helping
+
+Hand the desk to a helper for a visit: an invite link, Watch or Control, a banner with Stop,
+a time limit and a record; and an AI that diagnoses first and escalates to a person. Design in
+[REMOTE-SUPPORT.md](REMOTE-SUPPORT.md).
+
 ## Near-term order (suggested)
 1. Stand up a Dallas or Houston-LZ host, measure the latency win.
 2. Get the client onto a real iPad; tune the desktop for it.

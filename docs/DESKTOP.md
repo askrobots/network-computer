@@ -276,3 +276,25 @@ Declared in `provision/`, checked in `verify.sh`.
 3. Stream-friendly look (quick, measurable).
 4. Session restore.
 5. Native client shared folder; then files in the object server, mounted on every desk.
+
+## Printing: "My device"
+
+The desk has no printer of its own and should not need one: the printer is wherever you are.
+**My device** is the desk's default printer (CUPS, listening on localhost only):
+
+1. An app prints (File → Print), or `lp -d my-device FILE`, the file manager's right-click
+   **Print on my device**, or voice's `print` action.
+2. CUPS turns the job into a PDF (the queue's PPD, `/usr/share/ppd/nc/my-device.ppd`, asks
+   for one) and runs the `ncdevice` backend (`/usr/lib/cups/backend/ncdevice`, 0700 root).
+3. The backend PUTs it to nc-host's send socket with `print=1`; the host sends it on the file
+   channel with `"print": true` in the header.
+4. The client prints it: the iPhone/iPad/Mac app opens the system print dialog (AirPrint,
+   the macOS print panel) and discards the PDF afterwards; the browser prints it from a
+   hidden frame (Chrome, Firefox) or shows a 🖨 button that opens it (Safari, where a
+   frame cannot print a PDF and a pop-up needs a click). A client from before this just
+   saves the PDF like any sent file.
+
+Nobody connected: the PDF is saved to `~/Documents/Printed/` and a notification says so;
+the job does not vanish. `cups-browsed` and avahi stay off: the desk does not look for
+network printers.
+

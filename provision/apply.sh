@@ -216,10 +216,9 @@ echo ">> printing: \"My device\" prints on the device you are connected from"
 # the phone's, iPad's or Mac's own print dialog.
 chmod 0700 /usr/lib/cups/backend/ncdevice   # root: needs the send socket
 systemctl enable --now cups.socket cups.service >/dev/null 2>&1 || true
-if ! lpstat -v my-device >/dev/null 2>&1; then
-  lpadmin -p my-device -E -v ncdevice:/ -P /usr/share/ppd/nc/my-device.ppd \
-    -D "My device" -L "the device you are connected from" -o printer-error-policy=abort-job
-fi
+# (re)applied every run: CUPS keeps its own copy of the PPD
+lpadmin -p my-device -E -v ncdevice:/ -P /usr/share/ppd/nc/my-device.ppd \
+  -D "My device" -L "the device you are connected from" -o printer-error-policy=abort-job 2>/dev/null
 lpadmin -d my-device
 echo ">> personal settings (from the profile; applied once, never over the user's own changes)"
 PERSON="$(dirname "$0")/person.env"
@@ -345,8 +344,9 @@ if [ -n "$NC_DOMAIN" ]; then ufw delete allow 8765/tcp >/dev/null 2>&1 || true; 
 ufw allow 80/tcp >/dev/null; ufw allow 443/tcp >/dev/null   # Let's Encrypt + https
 ufw allow 3478/udp >/dev/null; ufw allow 49152:65535/udp >/dev/null
 ufw --force enable >/dev/null
-# nothing on a desk needs network discovery or printing daemons
-for u in avahi-daemon.socket avahi-daemon.service cups.socket cups.service cups-browsed.service; do
+# nothing on a desk needs network discovery; CUPS stays for "My device" and
+# listens on localhost only (verify checks 631 is not public)
+for u in avahi-daemon.socket avahi-daemon.service cups-browsed.service; do
   systemctl disable --now "$u" >/dev/null 2>&1 || true
 done
 

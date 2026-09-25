@@ -69,3 +69,37 @@ An action that failed says so, with what would help ("no welcome.txt in
 and leaving a dialog behind. *Why:* voice once "opened" `welcome.txt` when the
 file was `Welcome.txt`; the desktop showed "failed to open" and voice said it
 had worked.
+
+## 7. Know where it's going (an output check)
+
+*Not built yet (2026-09-25); for every app that makes something to print, send or publish.*
+
+A document is made for somewhere: a letter-size page, an email read on a phone, a slide on
+a projector, a web page, a label. The app should know the destination and check against it
+**before** it goes, the way a spelling checker checks words:
+
+- **Fits**: a table or a drawing wider than the page, text past the margin, a slide's text
+  running off it. Offer the fix: shrink to fit, landscape, wrap, or **tile** it across pages
+  with overlap marks.
+- **Readable there**: 7 pt text on paper, 12 px on a projector, light grey on white, a
+  picture too small to read on a phone, a scanned page that is only an image.
+- **Styled at all**: a plain wall of text with no headings sent as a report; mixed fonts
+  pasted in from three places.
+- **Right language and form**: a document in English with a Spanish date, a letter using
+  A4 going to the US, a spreadsheet with the wrong decimal comma for the recipient, a
+  greeting to the wrong name.
+- **Nothing that should not leave**: comments, tracked changes, hidden sheets, a password
+  in the text (the same `looksSensitive` rule the AI uses).
+
+Each check is a rule anyone can run without AI; an AI pass can add judgment (is this
+readable, is the tone right for this recipient). Findings are suggestions with one-tap
+fixes, never silent changes: the person decides (rule 4). And, as everywhere, each check
+and fix is an action (rule 3), so voice can "make it fit on one page".
+
+Where it belongs: Writer, Spreadsheet and Slides (print, PDF, email), Draw (print and
+export sizes), Webmaster (publish: pages checked at phone width), Cabinet (outgoing
+copies). It sits naturally in the app kit, next to `AppControl`: a destination
+(page size and margins, screen width, medium) plus a list of checks each app fills in.
+Printing through "My device" is where it pays first: the destination is a real sheet of
+paper.
+

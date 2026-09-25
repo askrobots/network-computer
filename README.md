@@ -35,6 +35,11 @@ and files. See [docs/PLAN.md](docs/PLAN.md) for the design,
 - **Files both ways:** drop files on the window and they land on the desk's Desktop. On
   the desk, right-click a file → **Send to my device** (or `nc-send FILE`) and a 📥 button
   appears in the page to save it.
+- **Print on the device you're using:** the desk's default printer is **My device**. File →
+  Print in any app (or right-click → **Print on my device**, or ask voice to print a file)
+  opens the print dialog of the phone, iPad, Mac or browser you're connected from, so it
+  prints on your own printer (AirPrint on iOS). Nobody connected: the PDF is kept in
+  `~/Documents/Printed`.
 - **Your object server files as a folder:** `~/Objects` on the desk is your files in the
   [DBBASIC object server](https://github.com/askrobots/dbbasic-object-server), mounted
   over its WebDAV, so every app and the terminal use them as ordinary files. See

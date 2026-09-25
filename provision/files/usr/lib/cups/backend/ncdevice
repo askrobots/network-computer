@@ -42,7 +42,11 @@ fi
 # not delivered: keep it for the desk user
 [ -r /etc/nc/env ] && . /etc/nc/env
 U=${NC_DESK_USER:-user}; H=$(getent passwd "$U" | cut -d: -f6)
-why=$(echo "$out" | sed '$d' | head -1); [ -n "$why" ] || why="nc-host is not running"
+case "$code" in
+  503) why="no device is connected" ;;
+  000|"") why="the desk's connection service is not running" ;;
+  *) why=$(echo "$out" | sed '$d' | head -1); [ -n "$why" ] || why="the device did not take it" ;;
+esac
 if [ -n "$H" ] && [ -d "$H" ]; then
   runuser -u "$U" -- mkdir -p "$H/Documents/Printed"
   dest="$H/Documents/Printed/$NAME"; n=2
