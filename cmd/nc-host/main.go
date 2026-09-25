@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/pion/sdp/v3"
 	"github.com/pion/webrtc/v4"
 	"github.com/pion/webrtc/v4/pkg/media"
 
@@ -35,6 +36,8 @@ type host struct {
 	capture             captureOpts
 	audio               string
 	mic                 string
+	camera              string // v4l2loopback device for the client's camera ('' = ignore it)
+	cam                 camOwner
 	dryRun              bool
 	api                 *webrtc.API
 	user, password, pin string
@@ -73,6 +76,7 @@ func main() {
 	extra := flag.String("ffmpeg-extra", "", "extra ffmpeg args inserted before the output")
 	custom := flag.String("ffmpeg-args", "", "full ffmpeg argument string; must end with '-f h264 pipe:1'")
 	audio := flag.String("audio-device", "", "capture audio from this device (mac: avfoundation index; linux: pulse source; '' = no audio)")
+	camera := flag.String("camera-device", "", "show the client's camera as this webcam (linux: a v4l2loopback device such as /dev/video10; '' = ignore)")
 	mic := flag.String("mic-device", "", "play the client's microphone into this device (linux: pulse sink such as nc-mic; mac: output device index, e.g. BlackHole; '' = ignore)")
 	user := flag.String("user", envOr("NC_USER", "nc"), "rendezvous basic auth username (env NC_USER)")
 	password := flag.String("password", os.Getenv("NC_PASSWORD"), "rendezvous basic auth password (env NC_PASSWORD)")
@@ -89,7 +93,7 @@ func main() {
 		*pin = randomPIN()
 	}
 	log.Printf("host PIN: %s   (clients must enter this to connect)", *pin)
-	h := &host{name: *name, audio: *audio, mic: *mic, dryRun: *dryRun, sessions: map[string]*session{}, user: *user, password: *password, pin: *pin, filesDir: *filesDir}
+	h := &host{name: *name, audio: *audio, mic: *mic, camera: *camera, dryRun: *dryRun, sessions: map[string]*session{}, user: *user, password: *password, pin: *pin, filesDir: *filesDir}
 	if *sendSocket != "" {
 		go h.serveSend(*sendSocket)
 		h.idleFile = filepath.Join(filepath.Dir(*sendSocket), "idle")
@@ -139,6 +143,14 @@ func main() {
 	m := &webrtc.MediaEngine{}
 	if err := m.RegisterDefaultCodecs(); err != nil {
 		log.Fatal(err)
+	}
+	// the MID header extension ties incoming RTP to its m-line: the camera's
+	// packets start after the offer (the camera is attached on demand) and must
+	// still find their transceiver
+	for _, k := range []webrtc.RTPCodecType{webrtc.RTPCodecTypeAudio, webrtc.RTPCodecTypeVideo} {
+		if err := m.RegisterHeaderExtension(webrtc.RTPHeaderExtensionCapability{URI: sdp.SDESMidURI}, k); err != nil {
+			log.Fatal(err)
+		}
 	}
 	h.api = webrtc.NewAPI(webrtc.WithMediaEngine(m))
 
@@ -277,13 +289,14 @@ func (h *host) handleOffer(ctx context.Context, m proto.Message) {
 		}
 	}()
 
-	// The client's microphone arrives as an incoming audio track.
+	// The client's microphone arrives as an incoming audio track, its camera
+	// (when the person turns it on) as an incoming video track.
 	pc.OnTrack(func(track *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
 		if track.Kind() == webrtc.RTPCodecTypeAudio {
 			go playMic(sctx, track, h.mic)
 			return
 		}
-		go drain(track)
+		go h.playCamera(sctx, pc, track)
 	})
 
 	var audioTrack *webrtc.TrackLocalStaticSample

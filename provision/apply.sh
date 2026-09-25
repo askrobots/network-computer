@@ -210,6 +210,20 @@ if ! grep -q 'nc-print' "$UCA" 2>/dev/null; then
   chown "$NC_DESK_USER:$NC_DESK_USER" "$UCA"
 fi
 
+echo ">> camera: the connected device's camera as a webcam here"
+# v4l2loopback ships with Ubuntu's kernel modules; a kernel without it gets the dkms build
+if ! modinfo v4l2loopback >/dev/null 2>&1; then
+  $APT install -y -q "linux-modules-extra-$(uname -r)" >/dev/null 2>&1 || $APT install -y -q v4l2loopback-dkms
+fi
+if [ -e /dev/video10 ] && [ "$(cat /sys/class/video4linux/video10/name 2>/dev/null)" != "network-computer camera" ]; then
+  modprobe -r v4l2loopback 2>/dev/null || true   # loaded before with other options
+fi
+modprobe v4l2loopback || echo "   (no v4l2loopback: the camera stays off)"
+# the desk user's apps open it; group video for later logins, ownership for the running session
+usermod -aG video "$NC_DESK_USER"
+printf 'SUBSYSTEM=="video4linux", ATTR{name}=="network-computer camera", OWNER="%s", GROUP="video", MODE="0660"\n' "$NC_DESK_USER" > /etc/udev/rules.d/70-nc-camera.rules
+udevadm control --reload; udevadm trigger --subsystem-match=video4linux 2>/dev/null || true
+
 echo ">> printing: \"My device\" prints on the device you are connected from"
 # CUPS (local only), a queue whose backend (ncdevice) hands each job as a PDF
 # to nc-host, and it is the default printer: File > Print in any app reaches

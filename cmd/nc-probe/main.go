@@ -24,6 +24,7 @@ import (
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
 	"github.com/pion/webrtc/v4/pkg/media"
+	"github.com/pion/webrtc/v4/pkg/media/ivfreader"
 
 	"github.com/askrobots/network-computer/internal/oggopus"
 	"github.com/askrobots/network-computer/internal/proto"
@@ -48,6 +49,7 @@ func main() {
 	clip := flag.String("clip", "", "put this text (or @file's contents) on the host clipboard, then log what the host sends back; \"-\" only watches, \"?\" asks for the host clipboard as it is")
 	sendPath := flag.String("send-file", "", "send this file to the host the way a drop on the web client does")
 	recvDir := flag.String("recv-dir", "", "accept files the host sends (nc-send) and save them here")
+	camTest := flag.Duration("camera-test", 0, "after this long, send a test pattern as the probe's camera (as the app attaches its camera on demand), to test camera passthrough")
 	micTone := flag.Int("mic-tone", 0, "send a sine tone of this frequency (Hz) as the probe's microphone, to test mic passthrough")
 	flag.Parse()
 
@@ -121,6 +123,14 @@ func main() {
 		}
 	} else {
 		pc.AddTransceiverFromKind(webrtc.RTPCodecTypeAudio, webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionRecvonly})
+	}
+	// the camera: its own sending video transceiver, empty until "turned on"
+	var camTrack *webrtc.TrackLocalStaticSample
+	if *camTest > 0 {
+		camTrack, _ = webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8}, "camera", "probe-camera")
+		if _, err := pc.AddTransceiverFromTrack(camTrack, webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionSendonly}); err != nil {
+			log.Fatalf("camera track: %v", err)
+		}
 	}
 	dc, _ := pc.CreateDataChannel("input", nil)
 	if *keyboard != "" {
@@ -286,6 +296,15 @@ func main() {
 	if micTrack != nil {
 		go sendTone(ctx, micTrack, *micTone)
 		log.Printf("sending a %d Hz tone as the microphone", *micTone)
+	}
+	if camTrack != nil {
+		go func() {
+			select {
+			case <-time.After(*camTest):
+				sendCamera(ctx, camTrack)
+			case <-ctx.Done():
+			}
+		}()
 	}
 
 	if *tz != "" {
@@ -541,4 +560,39 @@ func probeRecvFiles(pc *webrtc.PeerConnection, dir string) {
 			}
 		})
 	})
+}
+
+// sendCamera sends a VP8 test pattern (with a clock, so frames visibly move)
+// as the probe's camera, at 30 fps in real time.
+func sendCamera(ctx context.Context, track *webrtc.TrackLocalStaticSample) {
+	cmd := exec.CommandContext(ctx, "ffmpeg", "-hide_banner", "-loglevel", "error", "-re",
+		"-f", "lavfi", "-i", "testsrc2=size=640x480:rate=30",
+		"-c:v", "libvpx", "-deadline", "realtime", "-b:v", "1M", "-g", "30", "-f", "ivf", "pipe:1")
+	out, err := cmd.StdoutPipe()
+	if err == nil {
+		err = cmd.Start()
+	}
+	if err != nil {
+		log.Printf("camera ffmpeg: %v", err)
+		return
+	}
+	defer cmd.Wait()
+	ivf, _, err := ivfreader.NewWith(out)
+	if err != nil {
+		log.Printf("camera ivf: %v", err)
+		return
+	}
+	log.Printf("camera: sending a test pattern")
+	n := 0
+	for {
+		frame, _, err := ivf.ParseNextFrame()
+		if err != nil {
+			log.Printf("camera: sent %d frames", n)
+			return
+		}
+		if err := track.WriteSample(media.Sample{Data: frame, Duration: time.Second / 30}); err != nil {
+			return
+		}
+		n++
+	}
 }

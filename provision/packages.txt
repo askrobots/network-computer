@@ -46,3 +46,5 @@ tesseract-ocr
 # printing on the device you are connected from ("My device": CUPS + ncdevice)
 cups
 cups-filters
+# the connected device's camera as a webcam (v4l2loopback is in the kernel modules)
+v4l-utils
