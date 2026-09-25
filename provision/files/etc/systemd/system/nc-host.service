@@ -7,7 +7,7 @@ EnvironmentFile=/etc/nc/env
 Environment=DISPLAY=:0
 RuntimeDirectory=nc-host
 ExecStartPre=/bin/sleep 3
-ExecStart=/usr/local/bin/nc-host -rendezvous http://127.0.0.1:8765 -name ${NC_HOST_NAME} -size 1280x720 -fps 30 -bitrate 4M -encoder libx264 -audio-device nc.monitor -mic-device nc-mic -camera-device /dev/video10 -state-dir /var/lib/nc-host -files-dir /home/${NC_DESK_USER}/Desktop -send-socket /run/nc-host/send.sock
+ExecStart=/usr/local/bin/nc-host -rendezvous http://127.0.0.1:8765 -name ${NC_HOST_NAME} -size 1280x720 -fps 30 -bitrate 4M -encoder libx264 -audio-device nc.monitor -mic-device nc-mic -camera-device /dev/video10 -mdns=false -state-dir /var/lib/nc-host -files-dir /home/${NC_DESK_USER}/Desktop -send-socket /run/nc-host/send.sock
 Restart=always
 [Install]
 WantedBy=multi-user.target

@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/pion/ice/v4"
 	"github.com/pion/sdp/v3"
 	"github.com/pion/webrtc/v4"
 	"github.com/pion/webrtc/v4/pkg/media"
@@ -86,6 +87,7 @@ func main() {
 	tlsFP := flag.String("tls-fingerprint", os.Getenv("NC_TLS_FP"), "pin the rendezvous certificate by SHA-256 (env NC_TLS_FP); for a self-signed rendezvous")
 	filesDir := flag.String("files-dir", "", "save files dropped on the client window here ('' = refuse them); e.g. the desk user's Desktop")
 	sendSocket := flag.String("send-socket", "", "unix socket where nc-send hands over files for the connected client ('' = off)")
+	mdns := flag.Bool("mdns", true, "resolve clients' .local ICE candidates (mDNS, port 5353); off on a cloud desk")
 	dryRun := flag.Bool("dry-run", false, "log input events instead of injecting them")
 	flag.Parse()
 
@@ -152,7 +154,13 @@ func main() {
 			log.Fatal(err)
 		}
 	}
-	h.api = webrtc.NewAPI(webrtc.WithMediaEngine(m))
+	var se webrtc.SettingEngine
+	if !*mdns {
+		// a cloud desk cannot reach a client's .local names anyway, and the
+		// resolver would listen on 5353 on every interface
+		se.SetICEMulticastDNSMode(ice.MulticastDNSModeDisabled)
+	}
+	h.api = webrtc.NewAPI(webrtc.WithMediaEngine(m), webrtc.WithSettingEngine(se))
 
 	wsURL := strings.Replace(strings.Replace(*rz, "https://", "wss://", 1), "http://", "ws://", 1) + "/ws"
 	for {
