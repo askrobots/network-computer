@@ -19,8 +19,8 @@ FLUTTER_VERSION=3.47.5
 
 # name|source dir|title|linux app id|binary|categories|extensions|mime|comment
 APPS='writer|dbbasic-writer-native|DBBASIC Writer|com.dbbasic.writer|dbbasic_writer|Office;WordProcessor;|dbw|application/x-dbbasic-writer|Write documents
-spreadsheet|dbbasic-spreadsheet-native|DBBASIC Spreadsheet|com.dbbasic.spreadsheet|dbbasic_spreadsheet|Office;Spreadsheet;|||Spreadsheets
-slides|dbbasic-slides-native|DBBASIC Slides|com.dbbasic.slides|dbbasic_slides|Office;Presentation;|||Presentations
+spreadsheet|dbbasic-spreadsheet-native|DBBASIC Spreadsheet|com.dbbasic.spreadsheet|dbbasic_spreadsheet|Office;Spreadsheet;|dbs|application/x-dbbasic-sheet|Spreadsheets
+slides|dbbasic-slides-native|DBBASIC Slides|com.dbbasic.slides|dbbasic_slides|Office;Presentation;|dbp|application/x-dbbasic-slides|Presentations
 draw|dbbasic-draw|DBBASIC Draw|com.dbbasic.draw|dbbasic_draw|Graphics;2DGraphics;|||Draw and make images
 shell|dbbasicshell|DBBASIC Shell|com.dbbasic.shell|basicshell|System;TerminalEmulator;|||A terminal with AI
 webmaster|dbbasic-webmaster|DBBASIC Webmaster|com.dbbasic.webmaster|dbbasic_webmaster|Development;WebDevelopment;|||Build websites
