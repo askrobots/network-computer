@@ -44,6 +44,7 @@ check "desk socket for the desk user only (0660)" sh -c 'test "$(stat -c %a /run
 check "object server sign-in needs a one-time code" sh -c 'curl -s -o /dev/null -w "%{http_code}" "http://localhost:8009/open?next=/" | grep -qx 403 && ! ss -ltn | grep -q "0.0.0.0:8009" && test "$(stat -c %a /run/nc-voice)" = 700'
 check "self-check timer (nc-health) active" systemctl is-active --quiet nc-health.timer
 check "desktop dashboard running (conky)"  pgrep -x conky
+check "dashboard layouts for small screens (compact, mini)" sh -c 'test -f /etc/nc-dashboard/compact.conf && test -f /etc/nc-dashboard/mini.conf && command -v xdpyinfo'
 check "object server app windows (WebKitGTK)" python3 -c "import gi; gi.require_version(\"WebKit2\", \"4.1\"); from gi.repository import WebKit2"
 check "object server daemon (notifications)" systemctl is-active --quiet nc-object-daemon
 check "object server files as ~/Objects (WebDAV)" nc-object-files status

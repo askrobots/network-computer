@@ -34,6 +34,9 @@ wmctrl
 espeak-ng
 python3-venv
 conky-std
+# the dashboard picks its layout by screen size (xdpyinfo); desktop icons are marked trusted (gio)
+x11-utils
+libglib2.0-bin
 gir1.2-webkit2-4.1
 # the object server's files as ~/Objects (WebDAV)
 davfs2

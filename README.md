@@ -35,6 +35,9 @@ and files. See [docs/PLAN.md](docs/PLAN.md) for the design,
 - **Files both ways:** drop files on the window and they land on the desk's Desktop. On
   the desk, right-click a file → **Send to my device** (or `nc-send FILE`) and a 📥 button
   appears in the page to save it.
+- **Your camera as the desk's webcam:** tap 📷 (on a phone it's in ⋯ until it's on) and the
+  desk has a webcam, **network-computer camera**, for a video call in the desk's browser or
+  any app there. The camera is only attached while it's on, and the button stays red.
 - **Print on the device you're using:** the desk's default printer is **My device**. File →
   Print in any app (or right-click → **Print on my device**, or ask voice to print a file)
   opens the print dialog of the phone, iPad, Mac or browser you're connected from, so it

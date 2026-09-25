@@ -298,3 +298,29 @@ Nobody connected: the PDF is saved to `~/Documents/Printed/` and a notification 
 the job does not vanish. `cups-browsed` and avahi stay off: the desk does not look for
 network printers.
 
+## Camera: your device's camera as the desk's webcam
+
+The microphone already reaches the desk as a microphone; the camera does the same as a webcam.
+
+1. Every client opens a second video transceiver (sending) at connect, **empty**. 📷 attaches
+   the camera to it (`replaceTrack`), off detaches it and stops the camera, so the camera light
+   is on only while it is in use. On a phone the button waits in ⋯ until the camera is on, then
+   stays in the bar in red; ⋯ → Switch camera for front/back.
+2. nc-host (`-camera-device /dev/video10`) decodes the incoming track (H.264, VP8, VP9 or AV1)
+   with ffmpeg into a v4l2loopback device, letterboxed to 1280×720 so turning a phone sideways
+   does not change the device's format. It asks for a keyframe when it starts. When frames stop
+   for 2 s it lets the device go. One camera at a time: the newest one wins.
+3. On the desk it is **network-computer camera** (`/dev/video10`, owned by the desk user). With
+   `exclusive_caps`, browsers list it only while a device is sending: turn 📷 on first, then pick
+   it in the call.
+
+Provisioning: `linux-modules-extra` (cloud images leave out `videodev`, which v4l2loopback
+needs) plus `linux-image-extra-virtual` so kernel updates keep it; `/etc/modprobe.d/nc-camera.conf`,
+`/etc/modules-load.d/nc-camera.conf`, a udev rule for ownership. Test without a camera:
+`nc-probe -camera-test 2s` sends a test pattern; `ffmpeg -f v4l2 -i /dev/video10 -frames:v 1 x.jpg`
+as the desk user reads it back.
+
+The round trip (your camera to the desk, the call's picture back to you in the desk's video)
+adds some delay: fine for calls, not a mirror. Connecting other people (chat, invites) comes
+later, with remote support ([REMOTE-SUPPORT.md](REMOTE-SUPPORT.md)).
+
