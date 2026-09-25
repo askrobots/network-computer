@@ -10,6 +10,12 @@
 [ "$(id -un)" = root ] && exec nc-as-user "$0" "$@"
 pkill -x rofi && exit 0
 THEME='window {width: 44%; border-radius: 10px;} listview {lines: 10;} element {padding: 6px 10px;} inputbar {padding: 10px;}'
+FONT='Sans 14'
+# on a phone or tablet (nc-device): bigger rows a finger can hit; a phone gets the whole screen
+case "$(cat "$HOME/.config/nc/device-current" 2>/dev/null)" in
+  phone)  THEME='window {width: 100%; height: 100%; border-radius: 0;} listview {lines: 7;} element {padding: 16px 14px;} inputbar {padding: 16px;}'; FONT='Sans 20' ;;
+  tablet) THEME='window {width: 70%; border-radius: 12px;} listview {lines: 8;} element {padding: 12px 12px;} inputbar {padding: 14px;}'; FONT='Sans 17' ;;
+esac
 FILTER=
 case "$1" in
   windows) MODES=window ;;
@@ -18,6 +24,6 @@ case "$1" in
   *)       MODES=window,drun,files ;;
 esac
 exec rofi -show "${SHOW:-combi}" -combi-modes "$MODES" -modes "combi,records:nc-launch-records,files:nc-launch-files" -sidebar-mode \
-  -show-icons -matching fuzzy -sort -theme Arc-Dark -theme-str "$THEME" -font 'Sans 14' \
+  -show-icons -matching fuzzy -sort -theme Arc-Dark -theme-str "$THEME" -font "$FONT" \
   -window-format '{c}   {t}' -display-combi 'Search' -display-files 'file' -display-drun 'app' -display-window 'window' \
   -me-select-entry '' -me-accept-entry MousePrimary ${FILTER:+-filter "$FILTER"}

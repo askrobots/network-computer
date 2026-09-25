@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Desk layout for your device
+Comment=Phone, tablet or desktop: panel, buttons, text and launcher follow what you connect from (nc-device)
+Exec=nc-device
+OnlyShowIn=XFCE;
+NoDisplay=true
+X-XFCE-Autostart-Override=true

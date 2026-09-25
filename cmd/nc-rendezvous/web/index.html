@@ -867,10 +867,16 @@ window.addEventListener('pointerdown',unmute,true);
 // What the person is using right now: fingers, or a mouse or trackpad (an iPad
 // can have either). The desk's dbbasic apps grow their buttons for touch.
 let inputMode='';
+// and what kind of device: a phone (small screen, fingers), a tablet, or a desktop;
+// the desk lays itself out for it (nc-device)
+function deviceClass(){
+  const coarse=matchMedia('(pointer: coarse)').matches, small=Math.min(screen.width,screen.height)<600;
+  return coarse ? (small ? 'phone' : 'tablet') : 'desktop';
+}
 function reportInput(kind){
   if(kind===inputMode || !ctl || ctl.readyState!=='open') return;
   inputMode=kind;
-  try{ ctl.send(JSON.stringify({t:'input',kind})); }catch(e){}
+  try{ ctl.send(JSON.stringify({t:'input',kind,device:deviceClass()})); }catch(e){}
 }
 window.addEventListener('pointerdown',e=>reportInput(e.pointerType==='touch'?'touch':'pointer'),true);
 window.addEventListener('keydown',unmute,true);

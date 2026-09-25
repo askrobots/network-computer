@@ -65,4 +65,7 @@ type InputEvent struct {
 	On   bool   `json:"on,omitempty"`
 	Once bool   `json:"once,omitempty"` // voice: stop listening after one phrase
 	Kind string `json:"kind,omitempty"`
+	// input (client to host): Device is "phone", "tablet" or "desktop", the
+	// kind of screen and hands the person has, next to Kind (touch/pointer).
+	Device string `json:"device,omitempty"`
 }

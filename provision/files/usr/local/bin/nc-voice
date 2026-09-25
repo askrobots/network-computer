@@ -343,6 +343,12 @@ def act(a, scale=None):
         shown = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
         # get_text can be long: the model gets up to 8000 characters
         return f"{name} {action}: {shown[:8000]}"
+    if kind == "device":
+        want = str(a.get("for", ""))
+        if want not in ("phone", "tablet", "desktop", "auto"):
+            raise RuntimeError("device: phone, tablet, desktop or auto")
+        desk("nc-device", "set", want)
+        return f"laid the desk out for {want}"
     if kind == "switch":
         w = a.get("window", "")
         if desk("wmctrl", "-a", w).returncode == 0:
@@ -493,6 +499,11 @@ Actions, done in order:
                    Writer: write a whole letter or text with one insert_text (blank lines between
                    paragraphs, "# " for a heading); save a new document with save_as, into
                    ~/Objects/<a short name>.dbw unless they say where (suggest_name gives one).
+  {"do": "device", "for": "phone|tablet|desktop|auto"}   lay the desk out for that device
+                   (panel, window buttons, text size, launcher; on a phone every window
+                   maximized). It follows the device they connect from by itself; use this
+                   when they ask ("set this up for my phone", "I'm on the iPad now").
+                   On a phone keep to one window at a time and prefer doing things by voice.
   {"do": "look"}   to get a screenshot of the screen as it is (after your other actions)
 Seeing: the window list gives only titles, never contents. To read or describe what is in
 a window, or to click something, you need a screenshot: add look. Mouse coordinates are
@@ -607,14 +618,34 @@ def running_apps():
     return " | ".join(out)
 
 
+def device_now():
+    """What they connect from and how the desk is laid out (nc-device)."""
+    kv = {}
+    try:
+        for line in open("/run/nc-host/input"):
+            k, _, v = line.strip().partition("=")
+            kv[k] = v
+    except OSError:
+        pass
+    try:
+        layout = open(os.path.expanduser("~/.config/nc/device-current")).read().strip()
+    except OSError:
+        layout = ""
+    if not kv and not layout:
+        return ""
+    return f"{kv.get('device', '?')} ({kv.get('input', '?')}), desk laid out for {layout or 'desktop'}"
+
+
 def context():
     """What changes between turns, kept small: it rides on every message."""
     time.tzset()   # the desk's zone follows the client's (set at connect)
     rs = reminders()
     pending = "; ".join(f"{r['at']} {r['text']}" for r in rs[:8])
     running = running_apps()
+    device = device_now()
     return (f"[Desktop right now: open windows {json.dumps(open_windows())}; "
             f"time {time.strftime('%A %Y-%m-%d %H:%M %Z')}"
+            + (f"; device: {device}" if device else "")
             + (f"; apps: {running}" if running else "")
             + (f"; reminders: {pending}" if pending else "") + "]")
 
@@ -638,7 +669,7 @@ def parse_reply(reply):
 # app (click, drag, type, keys) get a quick second look from another model,
 # which sees the user's words and exactly what is about to happen. Trash, and
 # anything the reviewer is unsure of, is asked of the user out loud.
-SAFE = {"open_app", "switch", "close", "arrange", "open", "search", "look", "ls", "mkdir",
+SAFE = {"open_app", "switch", "close", "arrange", "open", "search", "look", "ls", "mkdir", "device",
         "move", "copy", "scroll", "read_page", "find", "note", "set_style", "remind",
         "cancel_reminder"}
 REVIEW = {"click", "drag", "type", "keys"}

@@ -43,7 +43,8 @@ type host struct {
 	display             displayControl
 	filesDir            string
 	idleFile            string    // "busy N" or "idle-since UNIX", for auto-stop (next to the send socket)
-	inputFile           string    // "touch" or "pointer": what the person is using, for the apps
+	inputFile           string    // input=touch|pointer, device=phone|tablet|desktop: for the apps and voice
+	inputKind, device   string
 	idleSince           time.Time // when the last client left
 	voice               voiceRelay
 	injOnce             sync.Once
@@ -348,7 +349,7 @@ func (h *host) handleOffer(ctx context.Context, m proto.Message) {
 				go setTimezone(ev.Text)
 				return
 			case "input":
-				h.writeInput(ev.Kind)
+				h.writeInput(ev.Kind, ev.Device)
 				return
 			case "voice":
 				if !h.voice.command(ev.On, ev.Once) {
@@ -502,15 +503,34 @@ func (h *host) injector() input.Injector {
 	return h.inj
 }
 
-// writeInput records what the person is using right now, "touch" (an iPad or
-// phone, fingers on the glass) or "pointer" (a mouse or trackpad), as the
-// client reports it: the dbbasic apps read it (dbbasic_app_kit InputMode) and
-// grow their targets for a finger. The last report wins.
-func (h *host) writeInput(kind string) {
-	if h.inputFile == "" || (kind != "touch" && kind != "pointer") {
+// writeInput records what the person is using right now, as the client
+// reports it: input "touch" (fingers on the glass) or "pointer" (a mouse or
+// trackpad), and device "phone", "tablet" or "desktop". The dbbasic apps read
+// it (dbbasic_app_kit InputMode) to size and arrange their controls; voice
+// reads it to know what "prepare this for my phone" means. The last report
+// wins; a report without a device keeps the one before.
+func (h *host) writeInput(kind, device string) {
+	if h.inputFile == "" {
 		return
 	}
-	os.WriteFile(h.inputFile, []byte(kind+"\n"), 0o644)
+	h.mu.Lock()
+	if kind == "touch" || kind == "pointer" {
+		h.inputKind = kind
+	}
+	if device == "phone" || device == "tablet" || device == "desktop" {
+		h.device = device
+	}
+	line := ""
+	if h.inputKind != "" {
+		line += "input=" + h.inputKind + "\n"
+	}
+	if h.device != "" {
+		line += "device=" + h.device + "\n"
+	}
+	h.mu.Unlock()
+	if line != "" {
+		os.WriteFile(h.inputFile, []byte(line), 0o644)
+	}
 }
 
 // writeIdle records whether anyone is connected, and since when nobody is:

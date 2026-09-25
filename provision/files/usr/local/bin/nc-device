@@ -1,0 +1,234 @@
+#!/usr/bin/env python3
+"""nc-device: the desk lays itself out for the device you are using.
+
+A phone, a tablet and a desktop want different things from the same desk:
+on a phone, one window at a time, big buttons, a launcher you can hit with a
+thumb; on a tablet, touch-sized controls but room for two windows; at a
+desktop, what you set up. The client reports what it is (the host writes
+/run/nc-host/input: input=touch|pointer, device=phone|tablet|desktop), and
+this applies the matching profile to the session: panel and dock size, window
+title bars, text size, the launcher, and on a phone maximized windows. The
+dbbasic apps read the same file (their app kit's InputMode).
+
+  nc-device                       watch and apply (autostarted with the session)
+  nc-device set phone|tablet|desktop|auto
+                                  choose one yourself ("set this up for my phone"); it
+                                  holds until you connect from a different kind of
+                                  device; auto follows the client again
+  nc-device status                JSON: what the client reports, any override, what is applied
+
+Your desktop settings are the baseline: saved the first time (in
+~/.config/nc/device-desktop.json) and restored whenever you are back at a
+desktop, so a layout you made yourself is never lost to a phone visit.
+"""
+import json
+import os
+import subprocess
+import sys
+import threading
+import time
+
+HOST_FILE = "/run/nc-host/input"
+# a choice made by you or voice ("set this up for my phone"): it lasts until the
+# client reports a different device (you pick up the iPad), then auto again
+OVERRIDE = os.path.expanduser("~/.config/nc/device-override")
+# the profile applied, kept across reboots (on the desk, with ~/.config), so
+# settings left by a phone visit are never taken for your desktop ones;
+# nc-launch reads it too
+CURRENT = os.path.expanduser("~/.config/nc/device-current")
+BASELINE = os.path.expanduser("~/.config/nc/device-desktop.json")
+
+# (channel, property, type): what a profile changes
+SETTINGS = [
+    ("xfce4-panel", "/panels/panel-1/size", "int"),
+    ("xfce4-panel", "/panels/panel-1/icon-size", "int"),
+    ("xfce4-panel", "/panels/panel-2/size", "int"),
+    ("xfwm4", "/general/theme", "string"),
+    ("xfwm4", "/general/title_font", "string"),
+    ("xsettings", "/Gtk/FontName", "string"),
+    ("xfce4-desktop", "/desktop-icons/icon-size", "int"),
+]
+FALLBACK = {   # when a property has never been set
+    "/panels/panel-1/size": "26", "/panels/panel-1/icon-size": "16", "/panels/panel-2/size": "48",
+    "/general/theme": "Default", "/general/title_font": "Sans Bold 9", "/Gtk/FontName": "Sans 10",
+    "/desktop-icons/icon-size": "48",
+}
+# per profile: absolute values, or ("+", n) to grow a font's size by n points
+PROFILES = {
+    "tablet": {"/panels/panel-1/size": "40", "/panels/panel-1/icon-size": "24", "/panels/panel-2/size": "64",
+               "/general/theme": "Default-hdpi", "/general/title_font": ("+", 2), "/Gtk/FontName": ("+", 2),
+               "/desktop-icons/icon-size": "64"},
+    "phone": {"/panels/panel-1/size": "44", "/panels/panel-1/icon-size": "28", "/panels/panel-2/size": "64",
+              "/general/theme": "Default-xhdpi", "/general/title_font": ("+", 3), "/Gtk/FontName": ("+", 3),
+              "/desktop-icons/icon-size": "64"},
+}
+
+
+def xq(*args):
+    return subprocess.run(["xfconf-query", *args], capture_output=True, text=True)
+
+
+def get(channel, prop):
+    r = xq("-c", channel, "-p", prop)
+    return r.stdout.strip() if r.returncode == 0 else None
+
+
+def put(channel, prop, kind, value):
+    if xq("-c", channel, "-p", prop, "-s", value).returncode != 0:
+        xq("-c", channel, "-p", prop, "-n", "-t", kind, "-s", value)
+
+
+def grow(font, n):
+    """'Sans Bold 9' + 3 -> 'Sans Bold 12'."""
+    name, _, size = font.rpartition(" ")
+    try:
+        return f"{name} {int(float(size)) + n}"
+    except ValueError:
+        return font
+
+
+def save_baseline():
+    b = {p: get(c, p) or FALLBACK[p] for c, p, _ in SETTINGS}
+    os.makedirs(os.path.dirname(BASELINE), exist_ok=True)
+    with open(BASELINE, "w") as f:
+        json.dump(b, f, indent=1)
+    return b
+
+
+def baseline():
+    """Your desktop settings, as they were the last time you left a desktop."""
+    try:
+        with open(BASELINE) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return save_baseline()
+
+
+def reported():
+    """(device, input) from the host's file."""
+    kv = {}
+    try:
+        for line in open(HOST_FILE):
+            k, _, v = line.strip().partition("=")
+            kv[k] = v
+    except OSError:
+        pass
+    d = kv.get("device") if kv.get("device") in ("phone", "tablet", "desktop") else "desktop"
+    return d, kv.get("input") or ("touch" if d != "desktop" else "pointer")
+
+
+def override():
+    try:
+        choice, _, when = open(OVERRIDE).read().strip().partition(" ")
+    except OSError:
+        return None
+    if choice not in ("phone", "tablet", "desktop"):
+        return None
+    if when != reported()[0]:   # a different device since: follow it
+        try:
+            os.remove(OVERRIDE)
+        except OSError:
+            pass
+        return None
+    return choice
+
+
+def wanted():
+    return override() or reported()[0]
+
+
+def applied():
+    try:
+        return open(CURRENT).read().strip() or None
+    except OSError:
+        return None
+
+
+def apply(profile):
+    # leaving the desktop: what is set now is yours (you may have changed it)
+    # (the very first time, baseline() saves them however this began)
+    if profile != "desktop" and applied() == "desktop":
+        save_baseline()
+    base = baseline()
+    changes = PROFILES.get(profile, {})
+    for channel, prop, kind in SETTINGS:
+        v = changes.get(prop, base.get(prop) or FALLBACK[prop])
+        if isinstance(v, tuple):
+            v = grow(base.get(prop) or FALLBACK[prop], v[1])
+        put(channel, prop, kind, v)
+    os.makedirs(os.path.dirname(CURRENT), exist_ok=True)
+    with open(CURRENT, "w") as f:
+        f.write(profile + "\n")
+    if profile == "phone":
+        for wid in normal_windows():
+            maximize(wid)
+
+
+# ---------- phone: every window maximized, new ones too ----------
+
+def normal_windows():
+    r = subprocess.run(["wmctrl", "-l"], capture_output=True, text=True)
+    ids = [line.split()[0] for line in r.stdout.splitlines() if line.split() and line.split()[1] != "-1"]
+    return [w for w in ids if is_normal(w)]
+
+
+def is_normal(wid):
+    r = subprocess.run(["xprop", "-id", wid, "_NET_WM_WINDOW_TYPE", "WM_TRANSIENT_FOR"],
+                       capture_output=True, text=True)
+    return "_NET_WM_WINDOW_TYPE_NORMAL" in r.stdout and "WM_TRANSIENT_FOR(WINDOW)" not in r.stdout
+
+
+def maximize(wid):
+    subprocess.run(["wmctrl", "-i", "-r", wid, "-b", "add,maximized_vert,maximized_horz"],
+                   capture_output=True)
+
+
+def watch_new_windows():
+    """While on a phone, maximize each window as it opens (dialogs stay as they are)."""
+    seen = set(normal_windows())
+    p = subprocess.Popen(["xprop", "-root", "-spy", "_NET_CLIENT_LIST"], stdout=subprocess.PIPE, text=True)
+    for _ in p.stdout:
+        time.sleep(0.3)   # let the new window map and get its type
+        now = set(normal_windows())
+        if applied() == "phone":
+            for wid in now - seen:
+                maximize(wid)
+        seen = now
+
+
+def watch():
+    threading.Thread(target=watch_new_windows, daemon=True).start()
+    last = None
+    while True:
+        w = wanted()
+        if w != last:
+            apply(w)
+            last = w
+        time.sleep(2)
+
+
+def main():
+    cmd = sys.argv[1] if len(sys.argv) > 1 else "watch"
+    if cmd == "watch":
+        watch()
+    elif cmd == "set" and len(sys.argv) == 3 and sys.argv[2] in ("phone", "tablet", "desktop", "auto"):
+        os.makedirs(os.path.dirname(OVERRIDE), exist_ok=True)
+        if sys.argv[2] == "auto":
+            try:
+                os.remove(OVERRIDE)
+            except OSError:
+                pass
+        else:
+            with open(OVERRIDE, "w") as f:
+                f.write(f"{sys.argv[2]} {reported()[0]}\n")
+        print(json.dumps({"ok": True, "device": wanted()}))
+    elif cmd == "status":
+        d, i = reported()
+        print(json.dumps({"ok": True, "reported": d, "input": i, "override": override(), "applied": applied()}))
+    else:
+        print(__doc__)
+        sys.exit(2)
+
+
+if __name__ == "__main__":
+    main()
