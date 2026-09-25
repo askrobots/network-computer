@@ -43,6 +43,7 @@ type host struct {
 	display             displayControl
 	filesDir            string
 	idleFile            string    // "busy N" or "idle-since UNIX", for auto-stop (next to the send socket)
+	inputFile           string    // "touch" or "pointer": what the person is using, for the apps
 	idleSince           time.Time // when the last client left
 	voice               voiceRelay
 	injOnce             sync.Once
@@ -91,6 +92,7 @@ func main() {
 	if *sendSocket != "" {
 		go h.serveSend(*sendSocket)
 		h.idleFile = filepath.Join(filepath.Dir(*sendSocket), "idle")
+		h.inputFile = filepath.Join(filepath.Dir(*sendSocket), "input")
 	}
 	h.idleSince = time.Now()
 	h.writeIdle()
@@ -345,6 +347,9 @@ func (h *host) handleOffer(ctx context.Context, m proto.Message) {
 			case "tz":
 				go setTimezone(ev.Text)
 				return
+			case "input":
+				h.writeInput(ev.Kind)
+				return
 			case "voice":
 				if !h.voice.command(ev.On, ev.Once) {
 					b, _ := json.Marshal(proto.InputEvent{T: "voice", Kind: "error", Text: "voice is not running on this desk"})
@@ -495,6 +500,17 @@ func (h *host) injector() input.Injector {
 		runInputHook()
 	})
 	return h.inj
+}
+
+// writeInput records what the person is using right now, "touch" (an iPad or
+// phone, fingers on the glass) or "pointer" (a mouse or trackpad), as the
+// client reports it: the dbbasic apps read it (dbbasic_app_kit InputMode) and
+// grow their targets for a finger. The last report wins.
+func (h *host) writeInput(kind string) {
+	if h.inputFile == "" || (kind != "touch" && kind != "pointer") {
+		return
+	}
+	os.WriteFile(h.inputFile, []byte(kind+"\n"), 0o644)
 }
 
 // writeIdle records whether anyone is connected, and since when nobody is:

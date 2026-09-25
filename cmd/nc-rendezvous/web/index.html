@@ -402,7 +402,8 @@ async function openPeer(){
   ctl.onmessage=onCtl;
   pc.ondatachannel=e=>{ if(e.channel.label==='file') receiveFile(e.channel); };
   ctl.onopen=()=>{ lastDisplay=null; sendDisplay(); sendKeyboard(false); voiceShow(false);
-    try{ ctl.send(JSON.stringify({t:'tz',text:Intl.DateTimeFormat().resolvedOptions().timeZone})); }catch(e){} };
+    try{ ctl.send(JSON.stringify({t:'tz',text:Intl.DateTimeFormat().resolvedOptions().timeZone})); }catch(e){}
+    inputMode=''; reportInput(matchMedia('(pointer: coarse)').matches ? 'touch' : 'pointer'); };
 
   pc.ontrack=ev=>{
     stream.addTrack(ev.track);
@@ -863,6 +864,15 @@ function unmute(){
 }
 $('#soundhint').onclick=unmute;
 window.addEventListener('pointerdown',unmute,true);
+// What the person is using right now: fingers, or a mouse or trackpad (an iPad
+// can have either). The desk's dbbasic apps grow their buttons for touch.
+let inputMode='';
+function reportInput(kind){
+  if(kind===inputMode || !ctl || ctl.readyState!=='open') return;
+  inputMode=kind;
+  try{ ctl.send(JSON.stringify({t:'input',kind})); }catch(e){}
+}
+window.addEventListener('pointerdown',e=>reportInput(e.pointerType==='touch'?'touch':'pointer'),true);
 window.addEventListener('keydown',unmute,true);
 
 /* ---------- voice ---------- */

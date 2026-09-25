@@ -60,7 +60,8 @@ type InputEvent struct {
 	Text string `json:"text,omitempty"`
 	More bool   `json:"more,omitempty"`
 	// voice: On starts or stops listening (client to host); Kind says what an
-	// event from the desk is: state, heard, said, did, error.
+	// event from the desk is: state, heard, said, did, error. input (client to
+	// host): Kind is "touch" or "pointer", what the person is using.
 	On   bool   `json:"on,omitempty"`
 	Once bool   `json:"once,omitempty"` // voice: stop listening after one phrase
 	Kind string `json:"kind,omitempty"`
