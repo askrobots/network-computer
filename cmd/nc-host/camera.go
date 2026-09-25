@@ -161,6 +161,9 @@ func (h *host) cameraRun(ctx context.Context, pc *webrtc.PeerConnection, track *
 	id := h.cam.take(cancel)
 	defer h.cam.release(id)
 
+	// provisioning sets it too; without it this v4l2loopback refuses every
+	// writer after the first one closes
+	exec.Command("v4l2-ctl", "-d", h.camera, "-c", "keep_format=1").Run()
 	format := camFormat(mime)
 	if format == "" {
 		return errors.New("unsupported camera codec " + mime)

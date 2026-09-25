@@ -34,7 +34,7 @@ check "sound recorder (Audacity) installed" command -v audacity
 check "video player (VLC) is the default"  sh -c 'command -v vlc && grep -q "^video/mp4=vlc.desktop" /etc/xdg/mimeapps.list'
 check "file transfer (nc-send, Send to my device)" sh -c 'command -v nc-send && test -S /run/nc-host/send.sock && . /etc/nc/env; grep -q nc-send /home/$NC_DESK_USER/.config/Thunar/uca.xml'
 check "printing (My device is the default printer)" sh -c 'lpstat -d | grep -q my-device && lpstat -p my-device | grep -q enabled && [ "$(stat -c %a /usr/lib/cups/backend/ncdevice)" = 700 ]'
-check "camera: network-computer camera at /dev/video10, the desk user's" sh -c '. /etc/nc/env; [ "$(cat /sys/class/video4linux/video10/name)" = "network-computer camera" ] && [ "$(stat -c %U /dev/video10)" = "$NC_DESK_USER" ] && grep -q -- "-camera-device /dev/video10" /etc/systemd/system/nc-host.service'
+check "camera: network-computer camera at /dev/video10, the desk user's" sh -c '. /etc/nc/env; [ "$(cat /sys/class/video4linux/video10/name)" = "network-computer camera" ] && [ "$(stat -c %U /dev/video10)" = "$NC_DESK_USER" ] && v4l2-ctl -d /dev/video10 -C keep_format | grep -q ": 1" && grep -q -- "-camera-device /dev/video10" /etc/systemd/system/nc-host.service'
 check "search and launch bar (Alt+Space)" sh -c 'command -v rofi && command -v nc-launch && nc-as-user xfconf-query -c xfce4-keyboard-shortcuts -p "/commands/custom/<Alt>space" | grep -qx nc-launch'
 check "object server answers (local only)" sh -c 'curl -sf http://127.0.0.1:8001/health >/dev/null && ! ss -ltn | grep -q "0.0.0.0:8001"'
 check "voice listener running (nc-voice)"   systemctl is-active --quiet nc-voice

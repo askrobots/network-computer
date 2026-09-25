@@ -224,7 +224,9 @@ fi
 modprobe v4l2loopback || echo "   (no v4l2loopback: the camera stays off)"
 # the desk user's apps open it; group video for later logins, ownership for the running session
 usermod -aG video "$NC_DESK_USER"
-printf 'SUBSYSTEM=="video4linux", ATTR{name}=="network-computer camera", OWNER="%s", GROUP="video", MODE="0660"\n' "$NC_DESK_USER" > /etc/udev/rules.d/70-nc-camera.rules
+# keep_format: this v4l2loopback (exclusive_caps) is otherwise stuck after the
+# first writer closes, and every later camera fails to open it
+printf 'SUBSYSTEM=="video4linux", ATTR{name}=="network-computer camera", OWNER="%s", GROUP="video", MODE="0660", RUN+="/usr/bin/v4l2-ctl -d $devnode -c keep_format=1"\n' "$NC_DESK_USER" > /etc/udev/rules.d/70-nc-camera.rules
 udevadm control --reload; udevadm trigger --subsystem-match=video4linux 2>/dev/null || true
 
 echo ">> printing: \"My device\" prints on the device you are connected from"
