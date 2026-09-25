@@ -34,7 +34,7 @@ print("   keys stored for:", ", ".join(done) or "none")
 PYEOF
 fi
 
-for p in app-theme app-views app-nav app-shell app-files app-projects app-collab app-notes app-tasks app-notify app-settings; do
+for p in app-theme app-views app-nav app-shell app-files app-projects app-collab app-notes app-tasks app-notify app-settings app-sites; do
   code=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Token $DBBASIC_ADMIN_TOKEN" "http://127.0.0.1:8001/packages/$p/install")
   echo "   package $p: $code"
 done
@@ -63,6 +63,31 @@ if ! davok; then
     davok && echo "   ~/Objects key minted" || echo "   !! ~/Objects key minted but refused (is DBBASIC_ENABLE_WEBDAV on?)"
   else
     echo "   !! could not mint the ~/Objects key"
+  fi
+  unset KEY
+fi
+
+# the object server for the desk user's dbbasic apps (Webmaster publishes
+# there): ~/.config/dbbasic/object-server.env, 0600, the user's; its own API key,
+# apart from ~/Objects' root-only one, minted again only if it stops working
+UH=$(getent passwd "$U" | cut -d: -f6); OSF="$UH/.config/dbbasic/object-server.env"
+oskey=$(sed -n 's/^DBBASIC_OBJECT_SERVER_KEY=//p' "$OSF" 2>/dev/null || true)
+code=none   # (not "$( [ -n ] && ...)": under set -e an empty key would end the script)
+if [ -n "$oskey" ]; then
+  code=$(printf 'header = "Authorization: Bearer %s"\n' "$oskey" |
+         curl -s -o /dev/null -w '%{http_code}' -K - -X PROPFIND -H 'Depth: 0' $DAVURL)
+fi
+if [ "$code" != 207 ]; then
+  KEY=$(curl -s -X POST -H "Authorization: Token $DBBASIC_ADMIN_TOKEN" -H 'Content-Type: application/json' \
+          -d '{"name":"desk apps (~/.config/dbbasic/object-server.env)"}' "http://127.0.0.1:8001/identity/users/$U/api-keys" |
+        "$PY" -c 'import json,sys; print(json.load(sys.stdin).get("token",""))')
+  if [ -n "$KEY" ]; then
+    runuser -u "$U" -- mkdir -p "$UH/.config/dbbasic"
+    (umask 077; printf '%s\n' "# the object server the dbbasic apps use (Webmaster publishes here)" \
+      "DBBASIC_OBJECT_SERVER_URL=http://127.0.0.1:8001" "DBBASIC_OBJECT_SERVER_USER=$U" \
+      "DBBASIC_OBJECT_SERVER_KEY=$KEY" > "$OSF")
+    chown "$U:$U" "$OSF"; chmod 600 "$OSF"
+    echo "   ~/.config/dbbasic/object-server.env written"
   fi
   unset KEY
 fi
