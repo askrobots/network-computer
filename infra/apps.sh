@@ -24,7 +24,8 @@ slides|dbbasic-slides-native|DBBASIC Slides|com.dbbasic.slides|dbbasic_slides|Of
 draw|dbbasic-draw|DBBASIC Draw|com.dbbasic.draw|dbbasic_draw|Graphics;2DGraphics;|||Draw and make images
 shell|dbbasicshell|DBBASIC Shell|com.dbbasic.shell|basicshell|System;TerminalEmulator;|||A terminal with AI
 webmaster|dbbasic-webmaster|DBBASIC Webmaster|com.dbbasic.webmaster|dbbasic_webmaster|Development;WebDevelopment;|||Build websites
-porter|dbbasic-porter/porter_app|DBBASIC Porter|com.dbbasic.porter|porter|Utility;|||Convert between formats'
+porter|dbbasic-porter/porter_app|DBBASIC Porter|com.dbbasic.porter|porter|Utility;|||Convert between formats
+cabinet|dbbasic-cabinet|DBBASIC Cabinet|com.dbbasic.cabinet|dbbasic_cabinet|Office;Scanning;OCR;|||The paperless office: scan, read, file'
 
 row() { echo "$APPS" | awk -F'|' -v n="$1" '$1==n'; }
 IP=$(doctl compute droplet list --format Name,PublicIPv4 --no-header 2>/dev/null | awk -v n="${NC_HOST_NAME:-nc}" '$1==n{print $2}')

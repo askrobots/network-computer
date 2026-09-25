@@ -94,7 +94,13 @@ open_site, list_pages, get_page, add_page and add_text (dictated text becomes
 heading, paragraph and list blocks), delete_page (asked), save, export (plain
 HTML into a new folder). Deploying stays a person's button: it publishes.
 
-Draw gets its actions next. The kit's web view is its own package
+Draw's: generate_image (marked paid: it costs money), open, save, save_as,
+new_canvas, undo.
+
+Cabinet's (the paperless office): list, search, get, import_file, read_text
+(OCR: pdftotext, ocrmypdf, tesseract, installed by provisioning), suggest (AI,
+on redacted text; marked paid), set, file. Its library is plain files:
+`inbox/` and `filed/<year>/`, each original beside `.cabinet.json` and `.txt`. The kit's web view is its own package
 (`dbbasic_editor_web_view`), so only Writer, Spreadsheet and Slides carry WebKit.
 
 ## Phone, tablet or desktop
@@ -145,6 +151,7 @@ infra/apps.sh build writer shell     # build and install (see: infra/apps.sh lis
 | Webmaster | `dbbasic-webmaster` | as it was; the object server can make it simpler later |
 | Porter | `dbbasic-porter` | format converter |
 | Draw | `dbbasic-draw` | first Linux build; its OpenAI key is still its own setting |
+| Cabinet | `dbbasic-cabinet` | the paperless office: add, read (OCR), suggest (AI), file; library in ~/Documents/Cabinet |
 
 Known gaps: Draw does not read `ai.env` yet; builds reach only the desk `infra/apps.sh` points at (other people's desks
 need their own build or a copy of `/desk/apps`).

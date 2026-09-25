@@ -39,3 +39,7 @@ gir1.2-webkit2-4.1
 davfs2
 # file dialogs for the dbbasic apps (Flutter's file_picker uses zenity on Linux)
 zenity
+# reading documents (Cabinet): text PDFs, scanned PDFs, images
+poppler-utils
+ocrmypdf
+tesseract-ocr
