@@ -217,6 +217,7 @@
     <button class="bar-btn" id="b-display" title="Screen size and scale">🖥️</button>
     <button class="bar-btn" id="b-mic" title="Microphone">🎤</button>
     <button class="bar-btn" id="b-cam" title="Camera: the desk's webcam (network-computer camera)">📷</button>
+    <button class="bar-btn" id="b-gray" title="No colour: the desk in grey on this device,, to compare">◐</button>
     <button class="bar-btn" id="b-graphs" title="Graphs">📈</button>
     <button class="bar-btn" id="b-stats" title="Stats">📊</button>
     <button class="bar-btn" id="b-launch" title="Search and launch on the desk (Alt+Space)">🔍</button>
@@ -664,6 +665,18 @@ async function setCam(on){
   }
 }
 $('#b-cam').onclick=()=>setCam(!camStream);
+
+/* ---------- no colour (A/B) ---------- */
+// The desk's picture in grey on this device only (the desk is unchanged): a
+// quick A/B for whether something is readable by contrast alone, not by
+// colour. Remembered per device.
+function setGray(on){
+  $('#v').style.filter = on ? 'grayscale(1)' : '';
+  $('#b-gray').classList.toggle('active', on);
+  store.set('gray', on ? '1' : '');
+}
+$('#b-gray').onclick=()=>{ setGray(!$('#b-gray').classList.contains('active')); toast($('#b-gray').classList.contains('active') ? 'No colour: the desk in grey (◐ again for colour)' : 'Colour'); };
+setGray(store.get('gray','')==='1');
 $('#mic-dev').onchange=e=>useMic(e.target.value).catch(err=>toast('Could not switch: '+err.message));
 
 /* ---------- screen size and scale ---------- */

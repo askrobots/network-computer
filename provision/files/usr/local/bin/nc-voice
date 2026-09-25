@@ -540,6 +540,10 @@ Actions, done in order:
                    when they ask ("set this up for my phone", "I'm on the iPad now").
                    On a phone keep to one window at a time and prefer doing things by voice.
   {"do": "look"}   to get a screenshot of the screen as it is (after your other actions)
+  Readability ("is anything hard to read?", "check the colours"): look, then name the places
+  that are hard to read (low contrast, tiny text, colour-only meaning) and what would fix each:
+  the app's own setting, a bigger screen scale, or the ◐ no-colour view on their device to
+  compare with and without colour.
 Seeing: the window list gives only titles, never contents. To read or describe what is in
 a window, or to click something, you need a screenshot: add look. Mouse coordinates are
 pixels in the most recent screenshot; never guess them without one.
