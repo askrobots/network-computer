@@ -233,7 +233,11 @@ def as_user(cmd):
 def cmd_relay_set(to):
     if os.geteuid() == 0:
         die("relay-set is the desk user's (their stream keys): run it as them")
-    url = sys.stdin.readline().strip()
+    if sys.stdin.isatty():   # typed or pasted: not shown (the screen may be what is streamed)
+        import getpass
+        url = getpass.getpass(f"{to}: the rtmp:// or rtmps:// address with the stream key (not shown): ").strip()
+    else:
+        url = sys.stdin.readline().strip()
     if not re.match(r"^rtmps?://\S+$", url):
         die("give the rtmp:// or rtmps:// address with the stream key, e.g. rtmp://live.twitch.tv/app/<key>")
     d = relay_dir()
