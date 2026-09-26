@@ -156,9 +156,9 @@ infra/apps.sh build writer shell     # build and install (see: infra/apps.sh lis
 | Shell | `dbbasic-shell` | AI terminal; keys from `ai.env`, Sonnet 5 |
 | Webmaster | `dbbasic-webmaster` | as it was; the object server can make it simpler later |
 | Porter | `dbbasic-porter` | format converter |
-| Draw | `dbbasic-draw` | first Linux build; its OpenAI key is still its own setting |
+| Draw | `dbbasic-draw` | pictures and AI images: its own key setting if set, else `OPENAI_API_KEY` from `ai.env` |
 | Cabinet | `dbbasic-cabinet` | the paperless office: add, read (OCR), suggest (AI), file; library in ~/Documents/Cabinet |
 | Dove | `dbbasic-dove` | mail, triage first, from any IMAP/SMTP server (address + password in Settings; kept in `~/.config/dbbasic/mail/account.json`, mode 600); new mail as it arrives; voice can list, read, archive and open a filled-in reply, never send |
 
-Known gaps: Draw does not read `ai.env` yet; builds reach only the desk `infra/apps.sh` points at (other people's desks
+Known gaps: builds reach only the desk `infra/apps.sh` points at (other people's desks
 need their own build or a copy of `/desk/apps`).
