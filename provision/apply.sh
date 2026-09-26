@@ -410,6 +410,16 @@ echo ">> Piper (local text to speech for nc-voice)"
 /opt/piper/bin/python -c 'import piper' 2>/dev/null || /opt/piper/bin/pip install -q piper-tts
 install -d /opt/piper/voices
 [ -s /opt/piper/voices/en_US-lessac-medium.onnx ] || ( cd /opt/piper/voices && /opt/piper/bin/python -m piper.download_voices en_US-lessac-medium >/dev/null 2>&1 )
+# Vosk: "hey desk" heard on live streams, on this computer (a 40 MB English model)
+/opt/piper/bin/python -c 'import vosk' 2>/dev/null || /opt/piper/bin/pip install -q vosk
+VOSK_M=vosk-model-small-en-us-0.15
+if [ ! -d /opt/vosk/$VOSK_M ]; then
+  install -d /opt/vosk
+  curl -fsSL -o /opt/vosk/m.zip https://alphacephei.com/vosk/models/$VOSK_M.zip
+  echo "30f26242c4eb449f948e42cb302dd7a686cb29a3423a8367f99ff41780942498  /opt/vosk/m.zip" | sha256sum -c --quiet - \
+    || { echo "!! vosk model checksum mismatch"; rm -f /opt/vosk/m.zip; exit 1; }
+  python3 -c 'import zipfile; zipfile.ZipFile("/opt/vosk/m.zip").extractall("/opt/vosk")' && rm -f /opt/vosk/m.zip
+fi
 for s in nc-object-server nc-object-daemon nc-voice; do
   install -d /etc/systemd/system/$s.service.d
   printf '[Service]\nUser=%s\nGroup=%s\n' "$NC_DESK_USER" "$NC_DESK_USER" > /etc/systemd/system/$s.service.d/user.conf

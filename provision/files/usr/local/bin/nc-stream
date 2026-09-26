@@ -15,6 +15,10 @@ people, voice and scripts.
                                     with the stream key, read from the input, never an argument
     nc-stream relay NAME TO         send the stream on to TO, as it comes (no re-encoding)
     nc-stream relay-stop TO | relays
+    nc-stream ears on|off           listen on live streams for "hey desk" (on this computer; on)
+    nc-stream eyes NAME|all on|off  look when the picture changes and say what is there (off)
+    nc-stream say TEXT              say it on the phone (its talkback)
+    nc-stream notice TEXT           show it on the phone's screen
 
 The passphrase is in /etc/nc/streams.env (root and the desk user). Relay
 addresses, with their stream keys, are the desk user's own:
@@ -22,7 +26,7 @@ addresses, with their stream keys, are the desk user's own:
 user and start again if either end drops. Everything but SRT publishing is on
 this computer only.
 """
-import json, os, pathlib, re, secrets, subprocess, sys, time, urllib.request
+import json, os, pathlib, re, secrets, subprocess, sys, time, urllib.parse, urllib.request
 
 ENV = "/etc/nc/streams.env"
 API = "http://127.0.0.1:9997/v3"
@@ -281,6 +285,79 @@ def cmd_relays():
         print(f"{t:<12} {st:<8} {('from ' + frm) if frm else ''}")
 
 
+def ai_settings_path():
+    home = os.path.expanduser("~") if os.geteuid() else f"/home/{desk_user()}"
+    return pathlib.Path(home) / ".config/nc/stream-ai.env"
+
+
+def set_ai(key, value):
+    p = ai_settings_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    lines = p.read_text().splitlines() if p.exists() else [
+        "# Live streams and AI (nc-stream ears|eyes). WAKE: listen for \"hey desk\" on this",
+        "# computer. LOOKS: off, all, or stream names: look when the picture changes, at most",
+        "# LOOKS_PER_HOUR, LOOK_GAP seconds apart, and say what is there.",
+        "WAKE=on", "LOOKS=off", "LOOK_GAP=60", "LOOKS_PER_HOUR=30"]
+    out, done = [], False
+    for line in lines:
+        if re.match(rf"\s*{key}\s*=", line):
+            out.append(f"{key}={value}")
+            done = True
+        else:
+            out.append(line)
+    if not done:
+        out.append(f"{key}={value}")
+    p.write_text("\n".join(out) + "\n")
+    if os.geteuid() == 0:
+        subprocess.run(["chown", f"{desk_user()}:{desk_user()}", str(p)], capture_output=True)
+
+
+def get_ai(key, default):
+    p = ai_settings_path()
+    for line in (p.read_text().splitlines() if p.exists() else []):
+        m = re.match(rf"\s*{key}\s*=\s*(.*?)\s*$", line)
+        if m:
+            return m.group(1)
+    return default
+
+
+def cmd_ears(onoff):
+    set_ai("WAKE", "on" if onoff == "on" else "off")
+    print('ears on: "hey desk" is heard on live streams (here; only what follows it goes to speech to text)'
+          if onoff == "on" else "ears off")
+
+
+def cmd_eyes(name, onoff):
+    cur = {n for n in get_ai("LOOKS", "off").split(",") if n and n != "off"}
+    if name == "all":
+        cur = {"all"} if onoff == "on" else set()
+    else:
+        safe(name)
+        cur = (cur | {name}) if onoff == "on" else (cur - {name})
+    set_ai("LOOKS", ",".join(sorted(cur)) or "off")
+    print(f"eyes: {','.join(sorted(cur)) or 'off'} (at most {get_ai('LOOKS_PER_HOUR', '30')} looks an hour, "
+          f"{get_ai('LOOK_GAP', '60')} s apart)")
+
+
+def talkback(path, **form):
+    data = urllib.parse.urlencode(form).encode()
+    try:
+        with urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:8078{path}", data=data), timeout=60) as r:
+            return json.loads(r.read())
+    except OSError as e:
+        die(f"talkback is not answering ({e}): is nc-voice running?")
+
+
+def cmd_say(*words):
+    t = talkback("/api/voice", text=" ".join(words))
+    print(f"said on the phone (#{t.get('id')})")
+
+
+def cmd_notice(*words):
+    t = talkback("/api/notice", text=" ".join(words), seconds="5")
+    print(f"shown on the phone (#{t.get('id')})")
+
+
 def main():
     a = sys.argv[1:]
     if not a:
@@ -291,7 +368,8 @@ def main():
         "on": (cmd_on, 0), "off": (cmd_off, 0), "key": (cmd_key, 0), "look": (cmd_look, 1),
         "listen": (cmd_listen, 1), "watch": (cmd_watch, 1), "record": (cmd_record, 2),
         "recordings": (cmd_recordings, 0), "relay-set": (cmd_relay_set, 1), "relay": (cmd_relay, 2),
-        "relay-stop": (cmd_relay_stop, 1), "relays": (cmd_relays, 0),
+        "relay-stop": (cmd_relay_stop, 1), "relays": (cmd_relays, 0), "ears": (cmd_ears, 1),
+        "eyes": (cmd_eyes, 2), "say": (cmd_say, 1), "notice": (cmd_notice, 1),
     }
     if c == "list":
         return cmd_list("--json" in rest)

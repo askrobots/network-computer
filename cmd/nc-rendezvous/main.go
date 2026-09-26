@@ -201,6 +201,7 @@ func main() {
 	authUser := flag.String("user", envOr("NC_USER", "nc"), "username (env NC_USER)")
 	authPass := flag.String("password", os.Getenv("NC_PASSWORD"), "password (env NC_PASSWORD); generated and printed if empty")
 	acmeDomain := flag.String("acme-domain", os.Getenv("NC_DOMAIN"), "get a Let's Encrypt cert for this domain, listening on :443 and :80 (env NC_DOMAIN)")
+	talkback := flag.String("talkback", "", "let phones read what the desk says back to a live stream (/talkback/...) from this local address, e.g. http://127.0.0.1:8078 ('' = off)")
 	sites := flag.String("sites", "", "serve the object server's published sites (/s/...) from this local address, e.g. http://127.0.0.1:8001 ('' = off)")
 	localAddr := flag.String("local", "", "with TLS on, also serve plain HTTP on this loopback address (e.g. 127.0.0.1:8765) for an nc-host on the same machine")
 	flag.Parse()
@@ -335,6 +336,14 @@ func main() {
 		}
 		mux.Handle("/s/", sp)
 		log.Printf("published sites: /s/ -> %s", *sites)
+	}
+	if *talkback != "" {
+		tp, err := talkbackProxy(*talkback)
+		if err != nil {
+			log.Fatalf("-talkback: %v", err)
+		}
+		mux.Handle("/talkback/", tp)
+		log.Printf("talkback: /talkback/ -> %s", *talkback)
 	}
 	// the page itself is public: no browser login dialog, the app's form asks once
 	files := http.FileServer(http.FS(sub))

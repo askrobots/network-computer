@@ -31,6 +31,8 @@ ai_usage), every desktop action as its own shell_commands row, and the AI may
 use its read_page and global_search tools.
 """
 import array
+import collections
+import hmac
 import glob
 import http.client
 import http.server
@@ -59,6 +61,12 @@ try:   # Piper: fast local speech; present when nc-voice runs on /opt/piper's py
     from piper import PiperVoice
 except ImportError:
     PiperVoice = None
+try:   # Vosk: "hey desk" heard on a live stream, on this computer (nothing leaves it)
+    from vosk import Model as VoskModel, KaldiRecognizer, SetLogLevel as vosk_log_level
+    vosk_log_level(-1)
+except ImportError:
+    VoskModel = None
+VOSK_MODEL = os.environ.get("NC_VOSK_MODEL", "/opt/vosk/vosk-model-small-en-us-0.15")
 TTS = os.environ.get("NC_VOICE_TTS", "piper" if PiperVoice else "openai")
 PIPER_VOICE = os.environ.get("NC_PIPER_VOICE", "/opt/piper/voices/en_US-lessac-medium.onnx")
 SOURCE = os.environ.get("NC_VOICE_SOURCE", "nc-mic-in")
@@ -237,9 +245,9 @@ def desk(*cmd, timeout=10):
     return subprocess.run(["nc-as-user", *cmd], capture_output=True, text=True, timeout=timeout)
 
 
-def desk_run(cmd, timeout=40, as_root=False):
+def desk_run(cmd, timeout=40):
     """A desk command's answer, or its complaint as the error."""
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout) if as_root else desk(*cmd, timeout=timeout)
+    r = desk(*cmd, timeout=timeout)
     if r.returncode:
         raise RuntimeError((r.stderr or r.stdout).strip() or f"{cmd[0]} failed")
     return r.stdout.strip()
@@ -417,7 +425,7 @@ def act(a, scale=None):
         desk("xdotool", "key", "--", *k.split())
         return f"pressed {k}"
     # live streams into the desk (nc-stream): what is live, what it says, where it goes
-    if kind in ("streams", "stream_listen", "stream_watch", "stream_record", "stream_relay", "stream_power"):
+    if kind in ("streams", "stream_listen", "stream_watch", "stream_record", "stream_relay"):
         name = str(a.get("name", ""))
         if kind == "streams":
             r = desk_run(["nc-stream", "list"])
@@ -438,8 +446,6 @@ def act(a, scale=None):
         if kind == "stream_relay":
             to = str(a.get("to", ""))
             return desk_run(["nc-stream", "relay-stop", to] if a.get("stop") else ["nc-stream", "relay", name, to])
-        if kind == "stream_power":
-            return desk_run(["nc-stream", "on" if a.get("on") else "off"], as_root=True)
     # Today: weather, headlines and radio (nc-feeds, nc-radio; ~/.config/nc/dashboard.env)
     if kind in ("weather", "news", "radio"):
         if kind == "weather":
@@ -569,7 +575,7 @@ Actions, done in order:
   {"do": "stream_record", "name": "phone", "on": true}   keep it on the desk's disk (48 h)
   {"do": "stream_relay", "name": "phone", "to": "twitch"}   broadcast it to a place they set up
      with nc-stream relay-set (never ask for or say a stream key); "stop": true ends it
-  {"do": "stream_power", "on": true}   open (or close) the desk to incoming streams
+  Opening the desk to streams is root's (nc-stream on): if streams are off, say so.
   {"do": "search", "query": "<text>"}   (opens the desk's search bar with it)
   {"do": "type", "text": "<text to type into the focused window>"}
   {"do": "keys", "keys": "<xdotool key names, e.g. ctrl+s or Return>"}
@@ -800,7 +806,7 @@ SAFE = {"open_app", "switch", "close", "arrange", "open", "print", "search", "lo
         "cancel_reminder", "weather", "news", "radio", "streams", "stream_look", "stream_listen",
         "stream_watch", "stream_record"}
 REVIEW = {"click", "drag", "type", "keys"}
-ASK = {"trash", "stream_relay", "stream_power"}   # post publicly; open or close a port
+ASK = {"trash", "stream_relay"}   # stream_relay: posts publicly
 REVIEW_MODEL = os.environ.get("NC_VOICE_REVIEW_MODEL", "anthropic:claude-sonnet-5")
 REVIEWER = """You check one action a voice assistant is about to take on a user's Linux
 desktop, before it happens. Reply with ONLY JSON: {"verdict": "ok|ask|no", "reason": "..."}.
@@ -839,8 +845,7 @@ def describe(a):
     if kind == "stream_relay":
         return (f"stop sending {a.get('to')} anything" if a.get("stop")
                 else f"broadcast the stream {a.get('name')} to {a.get('to')}")
-    if kind == "stream_power":
-        return "open the desk to live streams (UDP 8890)" if a.get("on") else "close the desk to live streams"
+
     if kind == "app":
         args = json.dumps(a.get("args") or {}, ensure_ascii=False)
         return f"{a.get('app')}: {a.get('action')} {args[:120]}"
@@ -881,6 +886,8 @@ class Voice:
         self.pending = None   # actions waiting for the user's yes or no
         self.dictating = False   # dictation: what is heard is typed, not acted on
         self.dict_fresh = True   # at the start of a line: no space in front
+        self.reply_stream = None   # the live stream a request came from (its answer goes back there)
+        self.talkback = Talkback(self) if self.piper else None
         global OBJ_FOR_ACTIONS
         OBJ_FOR_ACTIONS = self.obj
         threading.Thread(target=self.worker, daemon=True).start()
@@ -963,7 +970,12 @@ class Voice:
         while True:
             wav = self.utterances.get()
             try:
-                self.handle(wav)
+                if isinstance(wav, tuple) and wav[0] == "stream":
+                    self.stream_command(wav[1], wav[2])
+                elif isinstance(wav, tuple) and wav[0] == "remark":
+                    self.remark(wav[1], wav[2])
+                else:
+                    self.handle(wav)
             except Exception as e:  # keep listening whatever went wrong
                 event("error", str(e))
             if self.utterances.empty():
@@ -1153,10 +1165,38 @@ class Voice:
         self.history += [{"role": "user", "content": text},
                          {"role": "assistant", "content": json.dumps({"say": final})}]
 
+    def stream_command(self, name, wav):
+        """ "hey desk ..." said on a live stream: done as if said here, answered there."""
+        text = self.obj.stt(wav)
+        if not text:
+            return
+        event("heard", f"[{name}] {text}")
+        stream_log(name, f"heard: {text}")
+        self.reply_stream = name
+        try:
+            if self.talkback:
+                self.talkback.notice(f"heard: {text}", 3)
+            t = [("start", time.monotonic())]
+            if self.pending:
+                self.answer_pending(text)
+            else:
+                self.task(f"[Said on the live stream {name} by the person streaming it, after \"hey desk\"] {text}",
+                          lambda n: t.append((n, time.monotonic())))
+        finally:
+            self.reply_stream = None
+
+    def remark(self, name, text):
+        """What the desk saw on a stream: said to the phone, kept in the stream's log."""
+        stream_log(name, f"saw: {text}")
+        event("did", f"👁 {name}: {text}")
+        if self.talkback:
+            self.talkback.say(text)
+
     def ask(self, request, actions, why, scale):
         """Hold the rest of the actions until the user says yes or no."""
         what = describe(actions[0])
-        q = f"Should I {what}?" + (f" ({why})" if why else "") + " Say yes or no."
+        q = f"Should I {what}?" + (f" ({why})" if why else "") + (
+            " Say: hey desk, yes. Or: hey desk, no." if self.reply_stream else " Say yes or no.")
         self.pending = {"request": request, "actions": actions, "scale": scale}
         event("did", f"❓ waiting for your OK: {what}")
         self.speak(q, on_start=lambda: event("said", q))
@@ -1185,6 +1225,11 @@ class Voice:
             self.speak("Okay, I won't.", on_start=lambda: event("said", "Okay, I won't."))
 
     def speak(self, text, mark=lambda name: None, on_start=lambda: None):
+        if self.reply_stream and self.talkback:   # asked on a live stream: the answer goes back to it
+            try:
+                self.talkback.say(text)
+            except Exception as e:
+                log(f"talkback: {e}")
         self.speaking.set()
         try:
             if self.piper:   # stream: the first sentence plays while the rest is made
@@ -1408,6 +1453,366 @@ def serve_helper():
     srv.serve_forever()
 
 
+# ---------- live streams: talkback, "hey desk", and eyes ----------
+# A stream sent into the desk (nc-stream) is heard for "hey desk" here, on this
+# computer: nothing is sent anywhere until the wake word, and then only the few
+# seconds after it. What the desk says back to a stream request, and what it
+# says when it looks, goes to the phone too (talkback: the SRT Stream app polls
+# it through https://<desk>/talkback/, with the stream passphrase). Settings are
+# the desk user's: ~/.config/nc/stream-ai.env (nc-stream ears|eyes).
+
+STREAM_API = "http://127.0.0.1:9997/v3/paths/list"
+TALKBACK_PORT = 8078
+
+
+def stream_settings():
+    s = {"WAKE": "on", "LOOKS": "off", "LOOK_GAP": "60", "LOOKS_PER_HOUR": "30"}
+    try:
+        for line in open(os.path.expanduser(f"~{USER}/.config/nc/stream-ai.env")):
+            m = re.match(r"\s*([A-Z_]+)\s*=\s*(.*?)\s*$", line)
+            if m:
+                s[m.group(1)] = m.group(2).split(" #")[0].strip().strip('"\'')
+    except OSError:
+        pass
+    return s
+
+
+def stream_passphrase():
+    try:
+        for line in open("/etc/nc/streams.env"):
+            if line.startswith("MTX_PATHDEFAULTS_SRTPUBLISHPASSPHRASE="):
+                return line.split("=", 1)[1].strip()
+    except OSError:
+        pass
+    return ""
+
+
+class Talkback:
+    """What the desk says to the phone: spoken lines (Piper) and notices on its
+    screen, as the SRT Stream app polls for them (status, next?after=N, audio).
+    Ids are milliseconds, so a restart never goes backwards on a phone."""
+    def __init__(self, voice):
+        self.voice = voice
+        self.dir = "/run/nc-voice/talkback"
+        os.makedirs(self.dir, exist_ok=True)
+        self.lock = threading.Lock()
+        self.events = []
+        self.last = int(time.time() * 1000)
+        self.synth = threading.Lock()   # Piper, one at a time
+
+    def _add(self, event):
+        with self.lock:
+            self.last = max(self.last + 1, int(time.time() * 1000))
+            event["id"] = self.last
+            self.events = (self.events + [event])[-100:]
+            keep = {e.get("audioPath", "").rsplit("/", 1)[-1] for e in self.events}
+        for f in os.listdir(self.dir):
+            if f.startswith("voice-") and f not in keep:
+                try:
+                    os.remove(os.path.join(self.dir, f))
+                except OSError:
+                    pass
+        return event
+
+    def say(self, text):
+        text = text.strip()[:1000]
+        if not text:
+            return None
+        v = self.voice.piper
+        with self.synth:
+            pcm = b"".join(c.audio_int16_bytes for c in v.synthesize(text))
+            rate = v.config.sample_rate
+        name = f"voice-{int(time.time() * 1000)}-{os.urandom(3).hex()}.wav"
+        with wave.open(os.path.join(self.dir, name), "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(rate)
+            w.writeframes(pcm)
+        return self._add({"type": "voice", "text": text, "audioPath": f"audio/{name}",
+                          "createdAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
+
+    def notice(self, text, seconds=4):
+        return self._add({"type": "notice", "text": text.strip()[:300], "displaySeconds": max(1, min(15, seconds)),
+                          "createdAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
+
+    def status(self):
+        with self.lock:
+            return {"latestID": self.last, "queued": len(self.events)}
+
+    def next_after(self, i):
+        with self.lock:
+            return next((e for e in self.events if e["id"] > i), None)
+
+
+class TalkbackHTTP(http.server.BaseHTTPRequestHandler):
+    """The phone reads (with the passphrase, through the rendezvous); only this
+    computer adds (POST, never forwarded)."""
+    tb = None
+
+    def allowed(self):
+        want = stream_passphrase()
+        got = self.headers.get("Authorization", "")
+        return bool(want) and hmac.compare_digest(got.encode(), f"Bearer {want}".encode())
+
+    def send_json(self, obj, status=200):
+        b = json.dumps(obj).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(b)))
+        self.end_headers()
+        self.wfile.write(b)
+
+    def do_GET(self):
+        u = urllib.parse.urlsplit(self.path)
+        if u.path == "/health":
+            return self.send_json({"ok": True})
+        if not self.allowed():
+            return self.send_json({"error": "passphrase needed"}, 401)
+        if u.path == "/api/voice/status":
+            return self.send_json(self.tb.status())
+        if u.path == "/api/voice/next":
+            try:
+                after = int(urllib.parse.parse_qs(u.query).get("after", ["0"])[0])
+            except ValueError:
+                return self.send_json({"error": "after must be a number"}, 400)
+            e = self.tb.next_after(after)
+            if e is None:
+                self.send_response(204)
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                return
+            return self.send_json(e)
+        m = re.fullmatch(r"/audio/(voice-[0-9]+-[0-9a-f]+\.wav)", u.path)
+        if m and os.path.isfile(os.path.join(self.tb.dir, m.group(1))):
+            data = open(os.path.join(self.tb.dir, m.group(1)), "rb").read()
+            self.send_response(200)
+            self.send_header("Content-Type", "audio/wav")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(data)
+            return
+        self.send_json({"error": "not found"}, 404)
+
+    def do_POST(self):
+        if self.headers.get("X-Forwarded-For"):   # came through the rendezvous: from outside
+            return self.send_json({"error": "read only"}, 405)
+        u = urllib.parse.urlsplit(self.path)
+        n = int(self.headers.get("Content-Length") or 0)
+        form = urllib.parse.parse_qs(self.rfile.read(min(n, 16384)).decode(errors="replace"))
+        text = form.get("text", [""])[0].strip()
+        if not text:
+            return self.send_json({"error": "text needed"}, 400)
+        if u.path == "/api/voice":
+            return self.send_json(self.tb.say(text), 201)
+        if u.path == "/api/notice":
+            try:
+                secs = float(form.get("seconds", ["4"])[0])
+            except ValueError:
+                secs = 4
+            return self.send_json(self.tb.notice(text, secs), 201)
+        self.send_json({"error": "not found"}, 404)
+
+    def log_message(self, *a):
+        pass
+
+
+def serve_talkback(tb):
+    TalkbackHTTP.tb = tb
+    try:
+        srv = http.server.ThreadingHTTPServer(("127.0.0.1", TALKBACK_PORT), TalkbackHTTP)
+    except OSError as e:
+        log(f"talkback: {e}")
+        return
+    srv.serve_forever()
+
+
+def live_streams():
+    try:
+        with urllib.request.urlopen(STREAM_API, timeout=3) as r:
+            return [p["name"] for p in json.loads(r.read()).get("items", []) if p.get("ready")]
+    except (OSError, ValueError):
+        return []
+
+
+def stream_pcm(name):
+    return subprocess.Popen(["ffmpeg", "-hide_banner", "-loglevel", "error", "-rtsp_transport", "tcp",
+                             "-i", f"rtsp://127.0.0.1:8554/{name}", "-vn", "-ac", "1", "-ar", "16000",
+                             "-f", "s16le", "-"], stdout=subprocess.PIPE, stdin=subprocess.DEVNULL)
+
+
+def rms(chunk):
+    a = array.array("h", chunk)
+    return math.sqrt(sum(x * x for x in a) / len(a)) if a else 0
+
+
+def pcm_wav(pcm, rate=16000):
+    b = io.BytesIO()
+    with wave.open(b, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(pcm)
+    return b.getvalue()
+
+
+VOSK = {}
+
+
+def wake_spotter():
+    """One recognizer that knows only "hey desk" (and everything else as noise)."""
+    if "model" not in VOSK:
+        VOSK["model"] = VoskModel(VOSK_MODEL)
+    r = KaldiRecognizer(VOSK["model"], 16000, json.dumps(["hey desk", "[unk]"]))
+    r.SetWords(True)
+    return r
+
+
+def ear(v, name, alive):
+    """Hears "hey desk" on a stream; the words after it are the request."""
+    p = stream_pcm(name)
+    rec, ring, ring_at, fed = wake_spotter(), bytearray(), 0, 0
+    CH, KEEP = 3200, 16000 * 2 * 20   # 0.1 s reads; the last 20 s kept
+    log(f"ears on {name}")
+    try:
+        while alive():
+            d = p.stdout.read(CH)
+            if not d:
+                break
+            ring += d
+            fed += len(d) // 2
+            if len(ring) > KEEP:
+                cut = len(ring) - KEEP
+                del ring[:cut]
+                ring_at += cut // 2
+            if not rec.AcceptWaveform(d):
+                continue
+            res = json.loads(rec.Result())
+            words = res.get("result") or []
+            desk = [w for w in words if w["word"] == "desk"]
+            hey = [w for w in words if w["word"] == "hey"]
+            if not (desk and hey) or min(hey[0]["conf"], desk[0]["conf"]) < 0.8:
+                continue
+            start = max(ring_at, int(desk[0]["end"] * 16000))
+            cmd = bytearray(ring[(start - ring_at) * 2:])
+            v.talkback and v.talkback.notice("hey desk: listening…", 2)
+            # a pause after the wake word: the request is still to come
+            quiet, spoke = 0.0, len(cmd) > 16000 * 2 * 0.8
+            while alive() and len(cmd) < 16000 * 2 * 9 and quiet < (1.2 if spoke else 3.0):
+                d = p.stdout.read(CH)
+                if not d:
+                    break
+                cmd += d
+                fed += len(d) // 2
+                loud = rms(d) > 400
+                spoke = spoke or loud
+                quiet = 0.0 if loud else quiet + 0.1
+            rec = wake_spotter()   # a fresh start after the request
+            ring, ring_at = bytearray(), fed
+            if len(cmd) > 16000 * 2 * 0.4:
+                v.utterances.put(("stream", name, pcm_wav(bytes(cmd))))
+    finally:
+        p.kill()
+        log(f"ears off {name}")
+
+
+EYES = """You watch a live camera stream for the person streaming it, who hears
+what you say in an earpiece. Reply with ONE short spoken sentence (under 20
+words): what is in the picture now. If something needs their attention (the lens
+is covered, it is too dark or blurred, the picture froze), say that instead. No
+preamble, no markdown, no quotes."""
+
+
+def eyes(v, name, alive):
+    """Looks once as the stream starts, then when the picture changes (not on a
+    clock), within a gap and an hourly budget, and says what it sees: to the
+    phone, and in the stream's log."""
+    st = stream_settings()
+    gap, per_hour = max(15, int(st["LOOK_GAP"])), max(1, int(st["LOOKS_PER_HOUR"]))
+    looks = collections.deque()
+
+    def look():
+        now = time.monotonic()
+        while looks and now - looks[0] > 3600:
+            looks.popleft()
+        if (looks and now - looks[-1] < gap) or len(looks) >= per_hour:
+            return
+        looks.append(now)
+        try:
+            jpg = desk_run(["nc-stream", "look", name])
+            with open(jpg, "rb") as f:
+                fid = v.obj.upload("stream.jpg", f.read(), "image/jpeg")
+            os.remove(jpg)
+            try:
+                said = v.obj.chat(f"The live stream {name}, now.", [], EYES, attachments=[fid])
+            finally:
+                v.obj.delete_file(fid)
+            said = re.sub(r"\s+", " ", said).strip().strip('"')[:200]
+            if said:
+                v.utterances.put(("remark", name, said))
+        except Exception as e:
+            log(f"eyes {name}: {e}")
+
+    log(f"eyes on {name}")
+    time.sleep(5)
+    look()
+    # scene changes only: showinfo prints a line for each frame the select lets through
+    p = subprocess.Popen(["ffmpeg", "-hide_banner", "-nostats", "-rtsp_transport", "tcp",
+                          "-i", f"rtsp://127.0.0.1:8554/{name}", "-an",
+                          "-vf", "fps=2,scale=320:-2,select='gt(scene,0.3)',showinfo", "-f", "null", "-"],
+                         stderr=subprocess.PIPE, stdout=subprocess.DEVNULL, stdin=subprocess.DEVNULL, text=True)
+    try:
+        while alive():
+            line = p.stderr.readline()
+            if not line:
+                break
+            if "pts_time" in line:
+                look()
+    finally:
+        p.kill()
+        log(f"eyes off {name}")
+
+
+def stream_log(name, text):
+    """~/Documents/Streams/NAME/YYYY-MM-DD.md: what the desk saw and heard, by time."""
+    d = os.path.expanduser(f"~{USER}/Documents/Streams/{name}")
+    os.makedirs(d, exist_ok=True)
+    f = os.path.join(d, time.strftime("%Y-%m-%d") + ".md")
+    new = not os.path.exists(f)
+    with open(f, "a") as fh:
+        if new:
+            fh.write(f"# {name}, {time.strftime('%A %d %B %Y')}\n\n")
+        fh.write(f"- {time.strftime('%H:%M')} {text}\n")
+    subprocess.run(["chown", "-R", f"{USER}:{USER}", os.path.expanduser(f"~{USER}/Documents/Streams")],
+                   capture_output=True)
+
+
+def stream_senses(v):
+    """Starts ears (and eyes, where asked for) on each live stream; they end with it."""
+    running = {}
+    while True:
+        st = stream_settings()
+        live = set(live_streams())
+        want_eyes = {n.strip() for n in st["LOOKS"].split(",")} if st["LOOKS"] not in ("off", "") else set()
+        for name in live:
+            for kind, fn, on in (("ears", ear, st["WAKE"] != "off" and VoskModel is not None),
+                                 ("eyes", eyes, "all" in want_eyes or name in want_eyes)):
+                key = (kind, name)
+                t = running.get(key)
+                if on and not (t and t[0].is_alive()):
+                    flag = {"on": True}
+                    th = threading.Thread(target=fn, args=(v, name, lambda f=flag: f["on"]), daemon=True)
+                    running[key] = (th, flag)
+                    th.start()
+                elif not on and t:
+                    t[1]["on"] = False
+                    running.pop(key)
+        for key in [k for k, t in running.items() if not t[0].is_alive()]:
+            running.pop(key)
+        time.sleep(10)
+
+
 def main():
     if not ADMIN:
         sys.exit("nc-voice: DBBASIC_ADMIN_TOKEN is not set")
@@ -1418,6 +1823,9 @@ def main():
     SEARCHER = v.obj
     threading.Thread(target=notifications, args=(v.obj,), daemon=True).start()
     threading.Thread(target=reminder_loop, args=(v,), daemon=True).start()
+    if v.talkback:
+        threading.Thread(target=serve_talkback, args=(v.talkback,), daemon=True).start()
+    threading.Thread(target=stream_senses, args=(v,), daemon=True).start()
     while True:   # follow nc-host's command stream; reconnect when it restarts
         try:
             c = UnixHTTP(SOCK)
