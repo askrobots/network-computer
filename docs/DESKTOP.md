@@ -370,3 +370,23 @@ door from outside. Watching, recordings and the API are on the desk only.
   at it if either end drops; `relay-stop twitch` ends it. Voice asks before it
   broadcasts, and never asks for a key.
 
+**"Hey desk" on the stream.** While a stream is live, the desk listens to its sound
+for "hey desk", on this computer (Vosk, a small offline model: nothing is sent
+until the wake word, then only the few seconds after it). What follows goes to the
+same voice assistant as the speak button: "hey desk, take a note…", "…start
+recording", "…what do you see?", "…go live on YouTube". Anyone near the camera
+could say it, so from a stream only the everyday safe actions run at once; the rest
+waits for "hey desk, yes". `nc-stream ears off` stops it.
+
+**Talkback.** The answer is said on the desk and in the phone's earpiece: the SRT
+Stream app polls `https://<desk>/talkback/` with the stream passphrase (the
+rendezvous lets it read only; only the desk adds). `nc-stream say TEXT` and
+`nc-stream notice TEXT` send your own.
+
+**Eyes (off until asked).** `nc-stream eyes phone on`: the desk looks once as the
+stream starts and then only when the picture changes (ffmpeg's scene detection, on
+the desk), at most 30 times an hour and a minute apart (`~/.config/nc/stream-ai.env`),
+and says what it sees in one sentence. Every look is said, never silent, and kept
+with what was heard in `~/Documents/Streams/NAME/YYYY-MM-DD.md`. About half a cent a
+look.
+
