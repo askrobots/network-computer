@@ -1,0 +1,10 @@
+{
+  "policies": {
+    "Preferences": {
+      "media.peerconnection.ice.obfuscate_host_addresses": {
+        "Value": false,
+        "Status": "locked"
+      }
+    }
+  }
+}

@@ -370,6 +370,10 @@ door from outside. Watching, recordings and the API are on the desk only.
   at it if either end drops; `relay-stop twitch` ends it. Voice asks before it
   broadcasts, and never asks for a key.
 
+(Firefox on the desk has WebRTC's mDNS address hiding turned off by policy,
+`/etc/firefox/policies/policies.json`: otherwise a page that uses WebRTC makes it
+listen on UDP 5353, which a desk never needs.)
+
 **The program: what viewers get.** A relay sends the *program*, not the raw stream:
 `nc-program` (started by `nc-stream relay`, or `nc-stream program NAME on`) shows the
 stream while it is live and a slate while it is not: "Starting soon" before it
