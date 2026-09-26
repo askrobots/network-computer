@@ -1,0 +1,201 @@
+#!/usr/bin/env python3
+"""The program: what viewers get from a live stream, without a gap. The stream
+when it is live; a slate when it is not (starting, reconnecting); a goodbye
+when it ends. Published as NAME-program on the desk (relays send this).
+
+    nc-program NAME          run it (nc-stream program NAME on|end starts and ends it)
+
+The stream is decoded, and either its frames or the slate's are encoded again
+(x264, 720p30, 3 Mb/s, a keyframe every 2 s: what YouTube and Twitch ask for)
+and published to rtsp://127.0.0.1:8554/NAME-program. `touch $XDG_RUNTIME_DIR/
+nc-program/NAME.end` (nc-stream end NAME) shows the goodbye for 10 s and stops.
+
+Slates: ~/.config/nc/slates/{starting,reconnecting,ending}.png if there (any
+size: fitted to 1280x720), else made here from plain text.
+"""
+import os, pathlib, subprocess, sys, threading, time, urllib.request, json, collections
+
+W, H, FPS, AR, CH = 1280, 720, 30, 48000, 2
+FRAME = W * H * 3 // 2                    # yuv420p
+CHUNK = AR // FPS * CH * 2                # 1/30 s of s16le stereo
+RTSP = "rtsp://127.0.0.1:8554"
+HOME = pathlib.Path(os.path.expanduser("~"))
+RUN = pathlib.Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / "nc-program"
+FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+FONT2 = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+
+SLATES = {
+    "starting": ("Starting soon", "The stream begins in a moment."),
+    "reconnecting": ("Reconnecting…", "The camera's connection dropped. Back in a moment."),
+    "ending": ("Thanks for watching", "The stream is ending."),
+}
+
+
+def slate_frame(state):
+    """One yuv420p frame for a state: the person's image, or plain text on a dark gradient."""
+    own = HOME / ".config/nc/slates" / f"{state}.png"
+    fit = f"scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:color=0x10141c"
+    if own.exists():
+        cmd = ["ffmpeg", "-loglevel", "error", "-i", str(own), "-vf", fit + ",format=yuv420p",
+               "-frames:v", "1", "-f", "rawvideo", "-"]
+    else:
+        title, sub = SLATES[state]
+        esc = lambda t: t.replace("\\", "\\\\").replace(":", "\\:").replace("'", "’")
+        vf = (f"drawtext=fontfile={FONT}:text='{esc(title)}':fontsize=72:fontcolor=white:"
+              f"x=(w-text_w)/2:y=(h/2)-90,"
+              f"drawtext=fontfile={FONT2}:text='{esc(sub)}':fontsize=32:fontcolor=0xb8c4d6:"
+              f"x=(w-text_w)/2:y=(h/2)+10,format=yuv420p")
+        cmd = ["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i",
+               f"gradients=s={W}x{H}:c0=0x0e1320:c1=0x23324d:x0=0:y0=0:x1={W}:y1={H}:d=1",
+               "-vf", vf, "-frames:v", "1", "-f", "rawvideo", "-"]
+    out = subprocess.run(cmd, capture_output=True, timeout=30).stdout
+    if len(out) != FRAME:
+        raise RuntimeError(f"slate {state}: {len(out)} bytes, not {FRAME}")
+    return out
+
+
+def live_tracks(name):
+    """The stream's tracks when it is live (e.g. ["H264", "MPEG-4 Audio"]), else None."""
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:9997/v3/paths/get/{name}", timeout=2) as r:
+            p = json.loads(r.read())
+            return p.get("tracks") or [] if p.get("ready") else None
+    except (OSError, ValueError):
+        return None
+
+
+class Live:
+    """Decodes the stream into frames and sound; starts again when the stream comes back."""
+    def __init__(self, name):
+        self.name = name
+        self.frame, self.frame_at = None, 0.0
+        self.audio = collections.deque(maxlen=FPS * 2)
+        self.audio_at = 0.0
+        self.stop = False
+        threading.Thread(target=self.run, daemon=True).start()
+
+    def run(self):
+        fifo = RUN / f"{self.name}.live-audio"
+        while not self.stop:
+            tracks = live_tracks(self.name)
+            if tracks is None:
+                time.sleep(1)
+                continue
+            sound = any("Audio" in t or t in ("Opus", "G711", "LPCM", "MPEG-1/2 Audio", "AC-3") for t in tracks)
+            fit = f"scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2,fps={FPS},format=yuv420p"
+            cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-rtsp_transport", "tcp", "-i", f"{RTSP}/{self.name}",
+                   "-map", "0:v", "-vf", fit, "-f", "rawvideo", "pipe:1"]
+            if sound:   # a stream without sound gets silence (an output with nothing in it would fail)
+                fifo.unlink(missing_ok=True)
+                os.mkfifo(fifo)
+                cmd += ["-map", "0:a", "-af", "aresample=async=1000", "-ac", str(CH), "-ar", str(AR), "-f", "s16le", "-y", str(fifo)]
+            p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stdin=subprocess.DEVNULL)
+            if sound:
+                threading.Thread(target=self.read_audio, args=(fifo,), daemon=True).start()
+            try:
+                while not self.stop:
+                    f = p.stdout.read(FRAME)
+                    if len(f) < FRAME:
+                        break
+                    self.frame, self.frame_at = f, time.monotonic()
+            finally:
+                p.kill()
+                p.wait()
+            time.sleep(1)
+
+    def read_audio(self, fifo):
+        try:
+            with open(fifo, "rb") as a:
+                while not self.stop:
+                    c = a.read(CHUNK)
+                    if len(c) < CHUNK:
+                        return
+                    self.audio.append(c)
+                    self.audio_at = time.monotonic()
+        except OSError:
+            pass
+
+
+def main():
+    name = sys.argv[1] if len(sys.argv) > 1 else sys.exit(__doc__)
+    RUN.mkdir(parents=True, exist_ok=True)
+    end_flag = RUN / f"{name}.end"
+    end_flag.unlink(missing_ok=True)
+    slates = {s: slate_frame(s) for s in SLATES}
+    silence = bytes(CHUNK)
+    out_audio = RUN / f"{name}.program-audio"
+    out_audio.unlink(missing_ok=True)
+    os.mkfifo(out_audio)
+    enc = subprocess.Popen(
+        ["ffmpeg", "-hide_banner", "-loglevel", "error",
+         "-thread_queue_size", "512", "-f", "rawvideo", "-pix_fmt", "yuv420p", "-s", f"{W}x{H}", "-r", str(FPS), "-i", "pipe:0",
+         "-thread_queue_size", "512", "-f", "s16le", "-ar", str(AR), "-ac", str(CH), "-i", str(out_audio),
+         "-c:v", "libx264", "-preset", "superfast", "-tune", "zerolatency", "-b:v", "3000k", "-maxrate", "3500k",
+         "-bufsize", "6000k", "-g", str(FPS * 2), "-keyint_min", str(FPS * 2), "-sc_threshold", "0", "-pix_fmt", "yuv420p",
+         "-c:a", "aac", "-b:a", "128k", "-f", "rtsp", "-rtsp_transport", "tcp", f"{RTSP}/{name}-program"],
+        stdin=subprocess.PIPE)
+    # read-write: opening a pipe only to write waits for its reader, and ffmpeg
+    # reads its video first, which only comes once this is open (a deadlock)
+    audio_out = os.fdopen(os.open(out_audio, os.O_RDWR), "wb", buffering=0)
+    live = Live(name)
+    state, was_live, ending_at = "starting", False, None
+
+    def paced(write):
+        """Calls write() FPS times a second, on its own clock (sound and picture
+        each wait on their own pipe: one full never holds up the other)."""
+        t0, n = time.monotonic(), 0
+        while True:
+            n += 1
+            wait = t0 + n / FPS - time.monotonic()
+            if wait > 0:
+                time.sleep(wait)
+            try:
+                write()
+            except (BrokenPipeError, ValueError, OSError):
+                return
+
+    def sound():
+        fresh = state == "live" and live.audio_at and time.monotonic() - live.audio_at < 1.0 and live.audio
+        audio_out.write(live.audio.popleft() if fresh else silence)
+
+    def picture():
+        enc.stdin.write(live.frame if state == "live" and live.frame else slates[state])
+
+    threading.Thread(target=paced, args=(sound,), daemon=True).start()
+    threading.Thread(target=paced, args=(picture,), daemon=True).start()
+    print(f"program {name}-program: {state}", flush=True)
+    try:
+        while enc.poll() is None:
+            time.sleep(0.2)
+            now = time.monotonic()
+            if ending_at is None and end_flag.exists():
+                ending_at, state = now, "ending"
+                print(f"program {name}: ending", flush=True)
+            if ending_at is not None:
+                if now - ending_at > 10:
+                    break
+                continue
+            fresh = live.frame_at and now - live.frame_at < 1.5
+            new = "live" if fresh else ("reconnecting" if was_live else "starting")
+            was_live = was_live or fresh
+            if new != state:
+                state = new
+                print(f"program {name}: {state}", flush=True)
+    finally:
+        live.stop = True
+        try:
+            audio_out.close()
+            enc.stdin.close()
+        except OSError:
+            pass
+        enc.terminate()
+        try:
+            enc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            enc.kill()
+        out_audio.unlink(missing_ok=True)
+        end_flag.unlink(missing_ok=True)
+
+
+if __name__ == "__main__":
+    main()

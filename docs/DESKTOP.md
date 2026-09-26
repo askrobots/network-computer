@@ -370,6 +370,18 @@ door from outside. Watching, recordings and the API are on the desk only.
   at it if either end drops; `relay-stop twitch` ends it. Voice asks before it
   broadcasts, and never asks for a key.
 
+**The program: what viewers get.** A relay sends the *program*, not the raw stream:
+`nc-program` (started by `nc-stream relay`, or `nc-stream program NAME on`) shows the
+stream while it is live and a slate while it is not: "Starting soon" before it
+arrives, "Reconnecting…" when the phone's connection drops (YouTube and Twitch keep
+receiving: no gap, no ended broadcast), back to the stream the moment it returns.
+`nc-stream end NAME` ("hey desk, end the stream", which asks first) shows "Thanks for
+watching" for 10 seconds, then the program and its relays stop. It is encoded again
+(x264 720p30, 3 Mb/s, a keyframe every 2 s), about half a core. The slates are made
+from plain text; put your own pictures in `~/.config/nc/slates/`
+(`starting.png`, `reconnecting.png`, `ending.png`, any size) to use those instead.
+`nc-stream watch NAME` shows the program when it runs: what viewers see.
+
 **"Hey desk" on the stream.** While a stream is live, the desk listens to its sound
 for "hey desk", on this computer (Vosk, a small offline model: nothing is sent
 until the wake word, then only the few seconds after it). What follows goes to the

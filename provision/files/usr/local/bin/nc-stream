@@ -15,6 +15,9 @@ people, voice and scripts.
                                     with the stream key, read from the input, never an argument
     nc-stream relay NAME TO         send the stream on to TO, as it comes (no re-encoding)
     nc-stream relay-stop TO | relays
+    nc-stream program NAME on|off   what viewers get: the stream, or a slate while it is not there
+                                    (starting, reconnecting): published as NAME-program
+    nc-stream end NAME              "thanks for watching" for 10 s, then the program and its relays stop
     nc-stream ears on|off           listen on live streams for "hey desk" (on this computer; on)
     nc-stream eyes NAME|all on|off  look when the picture changes and say what is there (off)
     nc-stream say TEXT              say it on the phone (its talkback)
@@ -116,6 +119,8 @@ def cmd_off():
     need_root()
     for f in relay_dir().glob("*.url") if relay_dir().exists() else []:
         cmd_relay_stop(f.stem, quiet=True)
+    subprocess.run(as_user(["sh", "-c", 'for p in "$XDG_RUNTIME_DIR"/nc-program/*.pid; do [ -f "$p" ] && kill $(cat "$p") 2>/dev/null; rm -f "$p"; done']),
+                   capture_output=True)
     subprocess.run(["systemctl", "disable", "--now", "nc-streams"], capture_output=True)
     subprocess.run(["ufw", "delete", "allow", f"{PORT}/udp"], capture_output=True)
     print("streams off: UDP 8890 closed")
@@ -191,7 +196,10 @@ def cmd_listen(name, seconds="8", out=None):
 
 
 def cmd_watch(name):
-    ensure_live(safe(name))
+    safe(name)
+    if program_running(name):   # what viewers see, slates and all
+        name = f"{name}-program"
+    ensure_live(name)
     url = f"http://127.0.0.1:8888/{name}/"
     run = ["xdg-open", url] if os.geteuid() else ["nc-as-user", "xdg-open", url]
     subprocess.Popen(run, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -250,17 +258,58 @@ def cmd_relay_set(to):
     print(f"kept {to}: {host}/… (nc-stream relay NAME {to})")
 
 
+def program_running(name):
+    run = f'p="$XDG_RUNTIME_DIR/nc-program/{name}.pid"; [ -f "$p" ] && kill -0 $(cat "$p") 2>/dev/null && echo yes'
+    return subprocess.run(as_user(["sh", "-c", run]), capture_output=True, text=True).stdout.strip() == "yes"
+
+
+def cmd_program(name, onoff="on"):
+    safe(name)
+    if onoff == "off":
+        run = f'p="$XDG_RUNTIME_DIR/nc-program/{name}.pid"; [ -f "$p" ] && kill $(cat "$p") 2>/dev/null; rm -f "$p"'
+        subprocess.run(as_user(["sh", "-c", run]), capture_output=True)
+        print(f"program {name}: off")
+        return
+    if program_running(name):
+        print(f"program {name}: already on ({name}-program)")
+        return
+    run = (f'd="$XDG_RUNTIME_DIR/nc-program"; mkdir -p "$d"; rm -f "$d/{name}.end"; '
+           f'setsid nc-program {name} > "$d/{name}.log" 2>&1 & echo $! > "$d/{name}.pid"')
+    subprocess.run(as_user(["sh", "-c", run]), capture_output=True)
+    for _ in range(30):   # published within a few seconds
+        if any(p["name"] == f"{name}-program" and p.get("ready") for p in live()):
+            print(f"program {name}: on ({name}-program: the stream, or a slate while it is not there)")
+            return
+        time.sleep(0.5)
+    die(f"program {name} did not start (see $XDG_RUNTIME_DIR/nc-program/{name}.log)")
+
+
+def cmd_end(name):
+    safe(name)
+    if not program_running(name):
+        die(f"no program for {name}: nothing to end (nc-stream relay-stop TO stops a relay)")
+    # the goodbye, then the relays of it stop once it has been seen
+    run = (f'touch "$XDG_RUNTIME_DIR/nc-program/{name}.end"; '
+           f'(sleep 13; for f in "$XDG_RUNTIME_DIR"/nc-relays/*.from; do [ -f "$f" ] || continue; '
+           f'[ "$(cat "$f")" = "{name}-program" ] && nc-stream relay-stop "$(basename "$f" .from)"; done) '
+           f'>/dev/null 2>&1 &')
+    subprocess.run(as_user(["sh", "-c", run]), capture_output=True)
+    print(f"{name}: ending (\"thanks for watching\" for 10 s, then its relays stop)")
+
+
 def cmd_relay(name, to):
     safe(name), safe(to)
     f = relay_dir() / f"{to}.url"
     if not f.exists():
         die(f"no address for {to} yet: nc-stream relay-set {to} (then paste its rtmp address with the key)")
-    ensure_live(name)
+    # viewers get the program: the stream, or a slate while it is not there
+    cmd_program(name, "on")
+    src = f"{name}-program"
     cmd_relay_stop(to, quiet=True)
     # as it comes, no re-encoding (almost free); again every 5 s if either end drops
-    loop = (f'while :; do ffmpeg -hide_banner -loglevel warning -rtsp_transport tcp -i {RTSP}/{name} '
+    loop = (f'while :; do ffmpeg -hide_banner -loglevel warning -rtsp_transport tcp -i {RTSP}/{src} '
             f'-c copy -f flv "$(cat {f})"; sleep 5; done')
-    run = f'mkdir -p "$XDG_RUNTIME_DIR/nc-relays"; setsid sh -c \'{loop}\' >/dev/null 2>&1 & echo $! > "$XDG_RUNTIME_DIR/nc-relays/{to}.pid"; echo {name} > "$XDG_RUNTIME_DIR/nc-relays/{to}.from"'
+    run = f'mkdir -p "$XDG_RUNTIME_DIR/nc-relays"; setsid sh -c \'{loop}\' >/dev/null 2>&1 & echo $! > "$XDG_RUNTIME_DIR/nc-relays/{to}.pid"; echo {src} > "$XDG_RUNTIME_DIR/nc-relays/{to}.from"'
     r = subprocess.run(as_user(["sh", "-c", run]), capture_output=True, text=True)
     if r.returncode:
         die(r.stderr.strip())
@@ -373,7 +422,8 @@ def main():
         "listen": (cmd_listen, 1), "watch": (cmd_watch, 1), "record": (cmd_record, 2),
         "recordings": (cmd_recordings, 0), "relay-set": (cmd_relay_set, 1), "relay": (cmd_relay, 2),
         "relay-stop": (cmd_relay_stop, 1), "relays": (cmd_relays, 0), "ears": (cmd_ears, 1),
-        "eyes": (cmd_eyes, 2), "say": (cmd_say, 1), "notice": (cmd_notice, 1),
+        "eyes": (cmd_eyes, 2), "say": (cmd_say, 1), "notice": (cmd_notice, 1), "program": (cmd_program, 1),
+        "end": (cmd_end, 1),
     }
     if c == "list":
         return cmd_list("--json" in rest)

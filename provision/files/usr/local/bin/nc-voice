@@ -425,7 +425,7 @@ def act(a, scale=None):
         desk("xdotool", "key", "--", *k.split())
         return f"pressed {k}"
     # live streams into the desk (nc-stream): what is live, what it says, where it goes
-    if kind in ("streams", "stream_listen", "stream_watch", "stream_record", "stream_relay"):
+    if kind in ("streams", "stream_listen", "stream_watch", "stream_record", "stream_relay", "stream_end"):
         name = str(a.get("name", ""))
         if kind == "streams":
             r = desk_run(["nc-stream", "list"])
@@ -443,6 +443,8 @@ def act(a, scale=None):
             return desk_run(["nc-stream", "watch", name])
         if kind == "stream_record":
             return desk_run(["nc-stream", "record", name, "on" if a.get("on", True) else "off"])
+        if kind == "stream_end":
+            return desk_run(["nc-stream", "end", name])
         if kind == "stream_relay":
             to = str(a.get("to", ""))
             return desk_run(["nc-stream", "relay-stop", to] if a.get("stop") else ["nc-stream", "relay", name, to])
@@ -573,6 +575,8 @@ Actions, done in order:
   {"do": "stream_listen", "name": "phone", "seconds": 10}   what is said on it, as text
   {"do": "stream_watch", "name": "phone"}   open it on the desk's screen
   {"do": "stream_record", "name": "phone", "on": true}   keep it on the desk's disk (48 h)
+  {"do": "stream_end", "name": "phone"}   end the broadcast: "thanks for watching" for 10 s, then
+     every relay of it stops ("end the stream", "we're done")
   {"do": "stream_relay", "name": "phone", "to": "twitch"}   broadcast it to a place they set up
      with nc-stream relay-set (never ask for or say a stream key); "stop": true ends it
   Opening the desk to streams is root's (nc-stream on): if streams are off, say so.
@@ -810,7 +814,7 @@ SAFE = {"open_app", "switch", "close", "arrange", "open", "print", "search", "lo
         "cancel_reminder", "weather", "news", "radio", "streams", "stream_look", "stream_listen",
         "stream_watch", "stream_record"}
 REVIEW = {"click", "drag", "type", "keys"}
-ASK = {"trash", "stream_relay"}   # stream_relay: posts publicly
+ASK = {"trash", "stream_relay", "stream_end"}   # public: broadcasting, ending a broadcast
 REVIEW_MODEL = os.environ.get("NC_VOICE_REVIEW_MODEL", "anthropic:claude-sonnet-5")
 REVIEWER = """You check one action a voice assistant is about to take on a user's Linux
 desktop, before it happens. Reply with ONLY JSON: {"verdict": "ok|ask|no", "reason": "..."}.
@@ -846,6 +850,8 @@ def describe(a):
         return "move to Trash: " + ", ".join(a.get("paths") or [])
     if kind == "open":
         return f"open {a.get('target', '')}"
+    if kind == "stream_end":
+        return f"end the broadcast of {a.get('name')} (a goodbye slate, then the relays stop)"
     if kind == "stream_relay":
         return (f"stop sending {a.get('to')} anything" if a.get("stop")
                 else f"broadcast the stream {a.get('name')} to {a.get('to')}")
@@ -1660,7 +1666,9 @@ def serve_talkback(tb):
 def live_streams():
     try:
         with urllib.request.urlopen(STREAM_API, timeout=3) as r:
-            return [p["name"] for p in json.loads(r.read()).get("items", []) if p.get("ready")]
+            # NAME-program is the stream again, with slates (nc-program): heard and seen once, as NAME
+            return [p["name"] for p in json.loads(r.read()).get("items", [])
+                    if p.get("ready") and not p["name"].endswith("-program")]
     except (OSError, ValueError):
         return []
 
