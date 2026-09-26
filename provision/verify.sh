@@ -46,6 +46,7 @@ check "self-check timer (nc-health) active" systemctl is-active --quiet nc-healt
 check "memory: swap on, earlyoom running" sh -c 'swapon --show=NAME --noheadings | grep -q . && systemctl is-active --quiet earlyoom'
 check "desktop dashboard running (conky)"  pgrep -x conky
 check "dashboard layouts for small screens (compact, mini)" sh -c 'test -f /etc/nc-dashboard/compact.conf && test -f /etc/nc-dashboard/mini.conf && command -v xdpyinfo'
+check "dashboard Today: weather, headlines, radio (nc-feeds, nc-radio, defaults)" sh -c 'test -f /etc/nc-dashboard/feeds.txt && test -f /etc/nc-dashboard/stations.txt && test -f /etc/nc-dashboard/dashboard.env && nc-as-user nc-feeds lines full >/dev/null && nc-as-user nc-radio now >/dev/null && command -v cvlc >/dev/null && command -v zenity >/dev/null && test -f /usr/share/applications/nc-today.desktop && test -f /usr/share/applications/nc-radio.desktop'
 check "object server app windows (WebKitGTK)" python3 -c "import gi; gi.require_version(\"WebKit2\", \"4.1\"); from gi.repository import WebKit2"
 check "object server daemon (notifications)" systemctl is-active --quiet nc-object-daemon
 check "object server files as ~/Objects (WebDAV)" nc-object-files status

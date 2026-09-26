@@ -77,6 +77,28 @@ price to provisioning, which writes them with the other non-secret facts to
 `/etc/nc/info` (the env file holds passwords and stays root-only). Numbers update
 every 5 s and only that text is redrawn, so an idle desk still streams almost nothing.
 
+### Today: weather, headlines, radio (2026-09-26)
+
+The top of the dashboard is TODAY: the weather where you are (now and tomorrow), the
+station playing, and five headlines, one from each feed in turn so one busy feed does
+not fill them. A phone-sized screen gets one line (the weather and the station). The
+**Today** icon opens the same as a page to tap through (every headline a link), and
+the **Radio** icon a list of stations to tap, with Stop and "Find a station".
+Voice does all of it: "what's the weather", "weather for Lisbon" (kept as your place),
+"read me the headlines", "play some jazz", "stop the radio" (nc-voice's weather, news
+and radio actions).
+
+Each part is on by default and switched in a plain file, `~/.config/nc/dashboard.env`
+(`WEATHER=on`, `NEWS=on`, `RADIO=on`, `PLACE=`, `UNITS=`); the feeds are
+`~/.config/nc/feeds.txt` and the stations `~/.config/nc/stations.txt`, "Name | address"
+per line, made from `/etc/nc-dashboard/` the first time. Weather is Open-Meteo (free,
+no key: only the place name you chose is sent); radio plays on the desk (VLC), so it is
+heard on whatever device is connected; more stations come from radio-browser.info, a
+free community directory. Tools: `nc-feeds` (weather and headlines, cached in
+`~/.cache/nc/`, fetched in the background so the dashboard never waits) and `nc-radio`.
+Later: your own weather station (Tempest, Ambient Weather), and the object server
+fetching once for all your devices.
+
 The original idea:
 
 Instead of a picture, the desktop background shows the desk's state at a glance:

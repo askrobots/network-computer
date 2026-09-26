@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Today
+Comment=Weather and headlines (~/.config/nc/dashboard.env, feeds.txt)
+Exec=nc-feeds page
+Icon=weather-few-clouds
+Categories=Network;News;

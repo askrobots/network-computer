@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Radio
+Comment=Internet radio, played on the desk and heard on your device
+Exec=nc-radio pick
+Icon=audio-x-generic
+Categories=AudioVideo;Audio;Player;

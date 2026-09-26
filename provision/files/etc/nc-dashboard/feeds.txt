@@ -1,0 +1,7 @@
+# Headlines on the dashboard and the Today page: Name | the feed's address
+# (RSS or Atom). Add, remove or reorder; the newest items come first.
+BBC News | https://feeds.bbci.co.uk/news/rss.xml
+NPR | https://feeds.npr.org/1001/rss.xml
+The Guardian | https://www.theguardian.com/world/rss
+Ars Technica | https://feeds.arstechnica.com/arstechnica/index
+Hacker News | https://hnrss.org/frontpage

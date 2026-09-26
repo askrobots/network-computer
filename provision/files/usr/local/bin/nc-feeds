@@ -1,0 +1,395 @@
+#!/usr/bin/env python3
+"""Weather and headlines for the desk: the dashboard's live lines, a page to
+tap through (~/.cache/nc/today.html), and plain text for voice.
+
+    nc-feeds lines full|compact|mini   dashboard lines, from the cache (fast; conky runs it every
+                                       minute); an old cache is refreshed in the background
+    nc-feeds refresh                   fetch now (weather every 20 min, headlines every 30)
+    nc-feeds weather                   the weather as a sentence (voice)
+    nc-feeds news [N]                  the newest N headlines (voice)
+    nc-feeds place "Columbus, Ohio"    where the weather is for
+    nc-feeds page                      open the Today page
+
+What is shown and from where are plain files the person edits, made from the
+defaults in /etc/nc-dashboard/ the first time:
+    ~/.config/nc/dashboard.env   WEATHER=on NEWS=on RADIO=on, PLACE=, UNITS=
+    ~/.config/nc/feeds.txt       Name | https://.../rss.xml
+Weather is Open-Meteo (free, no key); nothing about the person is sent but
+the place name they chose. Items from feeds are shown as text, never run.
+"""
+import html, json, os, re, shutil, subprocess, sys, time, urllib.parse, urllib.request
+import xml.etree.ElementTree as ET
+from email.utils import parsedate_to_datetime
+
+HOME = os.path.expanduser("~")
+CONF = f"{HOME}/.config/nc"
+CACHE = f"{HOME}/.cache/nc"
+DEFAULTS = "/etc/nc-dashboard"
+UA = "network-computer-desk/1 (+https://github.com/askrobots/network-computer)"
+WEATHER_EVERY, NEWS_EVERY = 20 * 60, 30 * 60
+
+# WMO weather codes, in words
+WMO = {0: "clear", 1: "mostly clear", 2: "partly cloudy", 3: "cloudy", 45: "fog", 48: "freezing fog",
+       51: "light drizzle", 53: "drizzle", 55: "heavy drizzle", 56: "freezing drizzle", 57: "freezing drizzle",
+       61: "light rain", 63: "rain", 65: "heavy rain", 66: "freezing rain", 67: "freezing rain",
+       71: "light snow", 73: "snow", 75: "heavy snow", 77: "snow grains", 80: "showers", 81: "showers",
+       82: "heavy showers", 85: "snow showers", 86: "snow showers", 95: "thunderstorms",
+       96: "thunderstorms with hail", 99: "thunderstorms with hail"}
+
+
+def setup():
+    os.makedirs(CONF, exist_ok=True)
+    os.makedirs(CACHE, exist_ok=True)
+    for f in ("dashboard.env", "feeds.txt", "stations.txt"):
+        if not os.path.exists(f"{CONF}/{f}") and os.path.exists(f"{DEFAULTS}/{f}"):
+            shutil.copyfile(f"{DEFAULTS}/{f}", f"{CONF}/{f}")
+
+
+def settings():
+    s = {"WEATHER": "on", "NEWS": "on", "RADIO": "on", "PLACE": "", "UNITS": ""}
+    try:
+        for line in open(f"{CONF}/dashboard.env"):
+            m = re.match(r"\s*([A-Z_]+)\s*=\s*(.*?)\s*$", line)
+            if m:
+                s[m.group(1)] = m.group(2).split(" #")[0].strip().strip('"\'')
+    except OSError:
+        pass
+    return s
+
+
+def on(s, key):
+    return s.get(key, "on").lower() not in ("off", "no", "false", "0")
+
+
+def set_setting(key, value):
+    path = f"{CONF}/dashboard.env"
+    lines = open(path).read().splitlines() if os.path.exists(path) else []
+    out, done = [], False
+    for line in lines:
+        if re.match(rf"\s*{key}\s*=", line):
+            out.append(f'{key}="{value}"')
+            done = True
+        else:
+            out.append(line)
+    if not done:
+        out.append(f'{key}="{value}"')
+    open(path, "w").write("\n".join(out) + "\n")
+
+
+def get(url, timeout=10):
+    req = urllib.request.Request(url, headers={"User-Agent": UA})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return r.read()
+
+
+def load(name):
+    try:
+        return json.load(open(f"{CACHE}/{name}.json"))
+    except (OSError, ValueError):
+        return {}
+
+
+def save(name, data):
+    tmp = f"{CACHE}/{name}.json.tmp"
+    json.dump(data, open(tmp, "w"))
+    os.replace(tmp, f"{CACHE}/{name}.json")
+
+
+# --- weather ---------------------------------------------------------------
+
+def geocode(place):
+    """'Columbus, Ohio' or '39.96,-83.0' -> (name, lat, lon, country)."""
+    m = re.fullmatch(r"\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*", place)
+    if m:
+        return place, float(m.group(1)), float(m.group(2)), ""
+    name, _, region = place.partition(",")
+    q = urllib.parse.urlencode({"name": name.strip(), "count": 10, "language": "en"})
+    hits = json.loads(get(f"https://geocoding-api.open-meteo.com/v1/search?{q}")).get("results") or []
+    region = region.strip().lower()
+    if region:  # "Columbus, Ohio" / "Paris, FR": prefer the one in that region or country
+        hits = [h for h in hits if region in (h.get("admin1", "") + " " + h.get("country", "") + " "
+                                              + h.get("country_code", "")).lower()] or hits
+    if not hits:
+        raise RuntimeError(f"no place called {place}")
+    h = hits[0]
+    return h["name"], h["latitude"], h["longitude"], h.get("country_code", "")
+
+
+def refresh_weather(s):
+    place = s.get("PLACE", "")
+    if not place:
+        save("weather", {"at": time.time(), "error": "no place"})
+        return
+    old = load("weather")
+    if old.get("place") == place and old.get("lat") is not None:
+        name, lat, lon, cc = old["name"], old["lat"], old["lon"], old.get("cc", "")
+    else:
+        name, lat, lon, cc = geocode(place)
+    units = (s.get("UNITS") or ("us" if cc in ("US", "LR", "MM") else "metric")).lower()
+    imperial = units.startswith(("us", "imp", "f"))
+    q = urllib.parse.urlencode({
+        "latitude": lat, "longitude": lon, "timezone": "auto", "forecast_days": 2,
+        "current": "temperature_2m,apparent_temperature,weather_code,wind_speed_10m,precipitation",
+        "daily": "temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code",
+        **({"temperature_unit": "fahrenheit", "wind_speed_unit": "mph", "precipitation_unit": "inch"}
+           if imperial else {"wind_speed_unit": "kmh"})})
+    d = json.loads(get(f"https://api.open-meteo.com/v1/forecast?{q}"))
+    c, day = d["current"], d["daily"]
+    save("weather", {
+        "at": time.time(), "place": place, "name": name, "lat": lat, "lon": lon, "cc": cc,
+        "deg": "°F" if imperial else "°C", "wind": "mph" if imperial else "km/h",
+        "now": {"t": round(c["temperature_2m"]), "feels": round(c["apparent_temperature"]),
+                "sky": WMO.get(c["weather_code"], "?"), "wind": round(c["wind_speed_10m"])},
+        "days": [{"hi": round(day["temperature_2m_max"][i]), "lo": round(day["temperature_2m_min"][i]),
+                  "rain": day["precipitation_probability_max"][i] or 0,
+                  "sky": WMO.get(day["weather_code"][i], "?")} for i in range(len(day["time"]))],
+    })
+
+
+def weather_text(w, short=False):
+    if not w or w.get("error") == "no place":
+        return None
+    if "now" not in w:
+        return f"weather: {w.get('error', 'not yet')}"
+    n, t = w["now"], w["days"][0]
+    if short:
+        return f"{n['t']}{w['deg']} {n['sky']}, {t['hi']}/{t['lo']}"
+    return (f"{w['name']}: {n['t']}{w['deg']} {n['sky']}, high {t['hi']} low {t['lo']}"
+            + (f", rain {t['rain']}%" if t["rain"] >= 20 else ""))
+
+
+# --- headlines -------------------------------------------------------------
+
+def feeds():
+    out = []
+    try:
+        for line in open(f"{CONF}/feeds.txt"):
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            name, _, url = line.rpartition("|")
+            out.append(((name or url).strip(), url.strip()))
+    except OSError:
+        pass
+    return out
+
+
+def text_of(el):
+    t = "".join(el.itertext()) if el is not None else ""
+    return re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", t))).strip()
+
+
+def when(s):
+    try:
+        return parsedate_to_datetime(s).timestamp()
+    except (TypeError, ValueError):
+        pass
+    try:
+        from datetime import datetime
+        return datetime.fromisoformat(s.strip().replace("Z", "+00:00")).timestamp()
+    except (AttributeError, ValueError):
+        return 0
+
+
+def parse_feed(data, source):
+    root = ET.fromstring(data)
+    items = []
+    for it in root.iter():
+        tag = it.tag.rsplit("}", 1)[-1]
+        if tag not in ("item", "entry"):
+            continue
+        f = {c.tag.rsplit("}", 1)[-1]: c for c in it}
+        link = f.get("link")
+        href = (link.get("href") or link.text or "").strip() if link is not None else ""
+        title = text_of(f.get("title"))
+        if not title or not href.startswith(("http://", "https://")):
+            continue
+        date = next((f[k].text for k in ("pubDate", "published", "updated", "date")
+                     if f.get(k) is not None and f[k].text), "")
+        items.append({"title": title[:200], "link": href, "source": source, "at": when(date)})
+    return items[:15]
+
+
+def refresh_news():
+    items, errors = [], []
+    for name, url in feeds():
+        try:
+            items += parse_feed(get(url), name)
+        except Exception as e:  # one feed down must not empty the rest
+            errors.append(f"{name}: {e.__class__.__name__}")
+    save("news", {"at": time.time(), "items": turns(items)[:60], "errors": errors})
+
+
+def turns(items):
+    """Newest first, but every source in turn: one busy feed must not fill the
+    five lines the dashboard has."""
+    by = {}
+    for i in sorted(items, key=lambda i: -i["at"]):
+        by.setdefault(i["source"], []).append(i)
+    out = []
+    while any(by.values()):
+        rnd = [q.pop(0) for q in by.values() if q]
+        out += sorted(rnd, key=lambda i: -i["at"])
+    return out
+
+
+# --- the page and the dashboard -----------------------------------------------
+
+def radio_now():
+    try:
+        return open(f"{os.environ.get('XDG_RUNTIME_DIR', '/tmp')}/nc-radio/now").read().strip()
+    except OSError:
+        return ""
+
+
+def ago(t):
+    m = int((time.time() - t) / 60) if t else None
+    if m is None:
+        return ""
+    return f"{m} min ago" if m < 60 else f"{m // 60} h ago" if m < 48 * 60 else f"{m // 1440} days ago"
+
+
+def write_page(s):
+    w, n = load("weather"), load("news")
+    e = html.escape
+    parts = ['<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">',
+             "<title>Today</title><style>body{font:17px/1.45 system-ui,sans-serif;max-width:46rem;margin:0 auto;"
+             "padding:1rem 16px;background:#fbfbfa;color:#1d2330}h1{font-size:1.5rem;margin:.2rem 0 1rem}"
+             "h2{font-size:1rem;text-transform:uppercase;letter-spacing:.06em;color:#5b6577;margin:1.6rem 0 .4rem}"
+             "a{color:#1f4fbf;text-decoration:none}li{margin:.55rem 0}ul{padding-left:1.1rem}small{color:#6b7280}"
+             "@media (prefers-color-scheme:dark){body{background:#15181e;color:#dfe4ec}a{color:#8fb4ff}h2{color:#94a0b4}}"
+             "</style>", "<h1>Today</h1>"]
+    if on(s, "WEATHER"):
+        parts.append("<h2>Weather</h2>")
+        if "now" in w:
+            parts.append(f"<p><strong>{e(weather_text(w))}</strong><br><small>feels like {w['now']['feels']}{w['deg']}, "
+                         f"wind {w['now']['wind']} {w['wind']}</small></p>")
+            if len(w["days"]) > 1:
+                t = w["days"][1]
+                parts.append(f"<p>Tomorrow: {e(t['sky'])}, high {t['hi']} low {t['lo']}"
+                             + (f", rain {t['rain']}%" if t["rain"] >= 20 else "") + "</p>")
+        else:
+            parts.append('<p>Say "weather for" and your town, or put PLACE="your town" in ~/.config/nc/dashboard.env.</p>')
+    if on(s, "RADIO"):
+        now = radio_now()
+        parts.append("<h2>Radio</h2><p>" + (f"Playing {e(now)}. " if now else "")
+                     + 'Tap the Radio icon on the desktop, or say "play some jazz" or "stop the radio".</p>')
+    if on(s, "NEWS"):
+        parts.append("<h2>Headlines</h2><ul>")
+        for i in n.get("items", [])[:40]:
+            parts.append(f'<li><a href="{e(i["link"])}">{e(i["title"])}</a><br><small>{e(i["source"])}'
+                         f'{" · " + ago(i["at"]) if i["at"] else ""}</small></li>')
+        parts.append("</ul>")
+        if n.get("errors"):
+            parts.append(f"<p><small>Not answering: {e(', '.join(n['errors']))}</small></p>")
+        parts.append("<p><small>Feeds: ~/.config/nc/feeds.txt</small></p>")
+    tmp = f"{CACHE}/today.html.tmp"
+    open(tmp, "w").write("\n".join(parts))
+    os.replace(tmp, f"{CACHE}/today.html")
+
+
+def refresh(force=False):
+    s = settings()
+    if on(s, "WEATHER") and (force or time.time() - load("weather").get("at", 0) > WEATHER_EVERY
+                             or load("weather").get("place") != s.get("PLACE")):
+        try:
+            refresh_weather(s)
+        except Exception as e:
+            old = load("weather")
+            old.update({"at": time.time(), "error": str(e)[:80]})
+            save("weather", old)
+    if on(s, "NEWS") and (force or time.time() - load("news").get("at", 0) > NEWS_EVERY):
+        refresh_news()
+    write_page(s)
+
+
+def refresh_later():
+    """The dashboard must not wait for the network: fetch in the background, once."""
+    lock = f"{CACHE}/refresh.lock"
+    try:
+        if time.time() - os.path.getmtime(lock) < 120:
+            return
+    except OSError:
+        pass
+    open(lock, "w").close()
+    subprocess.Popen([sys.argv[0], "refresh"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     start_new_session=True)
+
+
+def cut(t, n):
+    return t if len(t) <= n else t[: n - 1].rstrip() + "…"
+
+
+def lines(mode):
+    s = settings()
+    w, n = load("weather"), load("news")
+    stale = (on(s, "WEATHER") and time.time() - w.get("at", 0) > WEATHER_EVERY) or \
+            (on(s, "NEWS") and time.time() - n.get("at", 0) > NEWS_EVERY) or \
+            w.get("place", "") != s.get("PLACE", "") and on(s, "WEATHER")
+    if stale:
+        refresh_later()
+    out = []
+    now = radio_now() if on(s, "RADIO") else ""
+    wt = weather_text(w, short=mode != "full") if on(s, "WEATHER") else None
+    if mode == "mini":  # a phone: one line
+        bits = [b for b in (wt, f"♪ {now}" if now else "") if b]
+        return [cut("  ".join(bits), 44)] if bits else []
+    if mode == "compact":
+        if wt:
+            out.append(cut(wt, 46))
+        if now:
+            out.append(cut(f"♪ {now}", 46))
+        return out
+    head = "${color2}TODAY${color}"
+    if on(s, "WEATHER"):
+        out.append(cut(wt, 46) if wt else 'weather: say "weather for <town>"')
+        if "now" in w and len(w["days"]) > 1:
+            t = w["days"][1]
+            out.append(cut(f"tomorrow {t['sky']}, {t['hi']}/{t['lo']}" + (f", rain {t['rain']}%" if t["rain"] >= 20 else ""), 46))
+    if now:
+        out.append(cut(f"♪ {now}", 46))
+    if on(s, "NEWS"):
+        for i in n.get("items", [])[:5]:
+            out.append("${color1}·${color} " + cut(i["title"], 44).replace("$", "$$").replace("#", "\\#"))
+    return [head] + out if out else []
+
+
+def main():
+    setup()
+    cmd = sys.argv[1] if len(sys.argv) > 1 else "lines"
+    if cmd == "lines":
+        print("\n".join(lines(sys.argv[2] if len(sys.argv) > 2 else "full")))
+    elif cmd == "refresh":
+        refresh(force="--force" in sys.argv)
+    elif cmd == "weather":
+        s = settings()
+        if not s.get("PLACE"):
+            print('I do not know where you are yet: say "weather for" and your town.')
+            return
+        if time.time() - load("weather").get("at", 0) > 300 or load("weather").get("place") != s["PLACE"]:
+            refresh_weather(s)
+        w = load("weather")
+        print(weather_text(w) + (f". Tomorrow {w['days'][1]['sky']}, high {w['days'][1]['hi']}."
+                                 if len(w.get("days", [])) > 1 else ""))
+    elif cmd == "news":
+        if time.time() - load("news").get("at", 0) > NEWS_EVERY:
+            refresh_news()
+        k = int(sys.argv[2]) if len(sys.argv) > 2 else 5
+        for i in load("news").get("items", [])[:k]:
+            print(f"{i['title']} ({i['source']})")
+    elif cmd == "place":
+        place = " ".join(sys.argv[2:]).strip()
+        name = geocode(place)[0] if place else ""
+        set_setting("PLACE", place)
+        refresh(force=True)
+        print(f"weather for {name}" if place else "no place: weather is off until one is set")
+    elif cmd == "page":
+        refresh()
+        subprocess.Popen(["xdg-open", f"{CACHE}/today.html"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        print(__doc__)
+        sys.exit(2)
+
+
+if __name__ == "__main__":
+    main()

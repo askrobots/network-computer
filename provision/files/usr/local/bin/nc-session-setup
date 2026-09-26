@@ -19,12 +19,18 @@ if [ ! -e "$L" ] && [ ! -e "$HOME/.config/nc/object-icon-placed" ]; then
   mkdir -p "$HOME/.config/nc" && touch "$HOME/.config/nc/object-icon-placed"
 fi
 
-# the dbbasic apps (nc-apps) on the desktop, so they are one double-click or
+# the dbbasic apps (nc-apps), Today and Radio on the desktop, so they are one double-click or
 # double-tap away: each placed once and marked trusted (no "untrusted
 # launcher" question); one you delete stays deleted; one installed later
 # appears (nc-apps install runs this)
-for f in /usr/share/applications/dbbasic-*.desktop; do
+for f in /usr/share/applications/dbbasic-*.desktop /usr/share/applications/nc-today.desktop /usr/share/applications/nc-radio.desktop; do
   [ -f "$f" ] || continue
+  # Today and Radio only while they are on (~/.config/nc/dashboard.env)
+  case $f in
+    */nc-today.desktop) grep -Eqi '^(WEATHER|NEWS)=(on|"on")?$' "$HOME/.config/nc/dashboard.env" 2>/dev/null ||
+                          [ ! -e "$HOME/.config/nc/dashboard.env" ] || continue ;;
+    */nc-radio.desktop) grep -Eqi '^RADIO=(off|no|false|0|"off")' "$HOME/.config/nc/dashboard.env" 2>/dev/null && continue ;;
+  esac
   n=$(basename "$f" .desktop); mark="$HOME/.config/nc/placed-$n"
   # a copy placed before the apps had launchers: bring its command up to date
   if [ -e "$D/$n.desktop" ] && grep -q '^Exec=/desk/apps/' "$D/$n.desktop"; then

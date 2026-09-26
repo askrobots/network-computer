@@ -408,6 +408,23 @@ def act(a, scale=None):
             raise RuntimeError(f"odd keys {k!r}")
         desk("xdotool", "key", "--", *k.split())
         return f"pressed {k}"
+    # Today: weather, headlines and radio (nc-feeds, nc-radio; ~/.config/nc/dashboard.env)
+    if kind in ("weather", "news", "radio"):
+        if kind == "weather":
+            cmd = ["nc-feeds", "place", a["place"]] if a.get("place") else ["nc-feeds", "weather"]
+        elif kind == "news":
+            cmd = ["nc-feeds", "news", str(min(int(a.get("count", 5)), 15))]
+        elif a.get("stop"):
+            cmd = ["nc-radio", "stop"]
+        else:
+            cmd = ["nc-radio", "play", str(a.get("play", ""))]
+        r = desk(*cmd, timeout=40)
+        if r.returncode:
+            raise RuntimeError((r.stderr or r.stdout).strip() or f"{kind} failed")
+        out = r.stdout.strip()
+        if kind == "weather" and a.get("place"):   # say the weather for the new place too
+            out += ". " + desk("nc-feeds", "weather", timeout=40).stdout.strip()
+        return out
     if kind == "search":
         q = a.get("query", "")
         subprocess.Popen(["nc-launch", "search", q], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -506,6 +523,12 @@ Actions, done in order:
   {"do": "print", "path": "~/Documents/x.pdf"}   print on the device they are connected from
      (its own print dialog opens there: AirPrint on an iPhone or iPad); PDFs, text, pictures.
      In an app, File > Print already prints there: "My device" is the default printer.
+  {"do": "weather"}   the weather where they are, as text for you to say; {"do": "weather",
+     "place": "Columbus, Ohio"} when they say where they are ("weather for Lisbon"): it is kept
+  {"do": "news", "count": 5}   the newest headlines from their feeds, to read out briefly
+  {"do": "radio", "play": "<station name, or words like jazz, bbc world, npr>"}   internet
+     radio, heard on their device; one at a time. {"do": "radio", "stop": true} stops it.
+     The Radio and Today icons on the desktop do the same by touch.
   {"do": "search", "query": "<text>"}   (opens the desk's search bar with it)
   {"do": "type", "text": "<text to type into the focused window>"}
   {"do": "keys", "keys": "<xdotool key names, e.g. ctrl+s or Return>"}
@@ -548,7 +571,7 @@ Seeing: the window list gives only titles, never contents. To read or describe w
 a window, or to click something, you need a screenshot: add look. Mouse coordinates are
 pixels in the most recent screenshot; never guess them without one.
 Steps: set "more": true when you need to see results before finishing: after ls,
-read_page, find or look, or to check that a click worked. You then get the results (and the screenshot if
+read_page, find, weather, news or look, or to check that a click worked. You then get the results (and the screenshot if
 you looked) and continue. Finish with "more": false. At most 8 steps; keep going only
 while it helps. Say a few words per step at most ("Opening the settings."), or nothing.
 Use no actions when they are just talking or asking something.

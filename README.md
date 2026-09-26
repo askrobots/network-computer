@@ -35,6 +35,10 @@ and files. See [docs/PLAN.md](docs/PLAN.md) for the design,
 - **Files both ways:** drop files on the window and they land on the desk's Desktop. On
   the desk, right-click a file → **Send to my device** (or `nc-send FILE`) and a 📥 button
   appears in the page to save it.
+- **Today on the dashboard:** the weather where you are, the newest headlines from your
+  feeds, and internet radio heard on your device (the **Today** and **Radio** icons, or
+  voice: "play some jazz"). Each is on by default and switched off in
+  `~/.config/nc/dashboard.env`.
 - **Your camera as the desk's webcam:** tap 📷 (on a phone it's in ⋯ until it's on) and the
   desk has a webcam, **network-computer camera**, for a video call in the desk's browser or
   any app there. The camera is only attached while it's on, and the button stays red.
@@ -65,7 +69,7 @@ and files. See [docs/PLAN.md](docs/PLAN.md) for the design,
   prints the message to send them. See [docs/DESKS.md](docs/DESKS.md).
 - **One-command desk on DigitalOcean:** `infra/droplet.sh up` builds a provisioned
   Ubuntu desktop (Xfce, Firefox, VLC, Audacity, the tools above) with its DNS name,
-  checked by 71 automated checks; `infra/droplet.sh down` destroys it and keeps the desk.
+  checked by 72 automated checks; `infra/droplet.sh down` destroys it and keeps the desk.
 
 ### Clients
 

@@ -1,0 +1,195 @@
+#!/usr/bin/env python3
+"""Internet radio on the desk: the sound goes to whatever device is connected.
+
+    nc-radio play NAME|URL|WORDS   a station from ~/.config/nc/stations.txt by name, a
+                                   stream URL, or else the most-liked station on
+                                   radio-browser.info for those words ("jazz", "bbc world")
+    nc-radio stop
+    nc-radio now                   what is playing
+    nc-radio list                  your stations
+    nc-radio search WORDS          stations on radio-browser.info (not played)
+    nc-radio pick                  a list to tap (the Radio icon on the desktop)
+
+One station at a time; playing another stops the first. Stations are a plain
+file, "Name | stream URL" per line, made from /etc/nc-dashboard/stations.txt
+the first time. radio-browser.info is a free, community-kept directory.
+"""
+import json, os, re, signal, shutil, subprocess, sys, time, urllib.parse, urllib.request
+
+HOME = os.path.expanduser("~")
+STATIONS = f"{HOME}/.config/nc/stations.txt"
+RUN = f"{os.environ.get('XDG_RUNTIME_DIR', '/tmp')}/nc-radio"
+UA = "network-computer-desk/1 (+https://github.com/askrobots/network-computer)"
+DIRECTORY = ["https://de1.api.radio-browser.info", "https://de2.api.radio-browser.info",
+             "https://all.api.radio-browser.info"]
+
+
+def mine():
+    if not os.path.exists(STATIONS) and os.path.exists("/etc/nc-dashboard/stations.txt"):
+        os.makedirs(os.path.dirname(STATIONS), exist_ok=True)
+        shutil.copyfile("/etc/nc-dashboard/stations.txt", STATIONS)
+    out = []
+    try:
+        for line in open(STATIONS):
+            line = line.strip()
+            if line and not line.startswith("#") and "|" in line:
+                name, _, url = line.rpartition("|")
+                out.append((name.strip(), url.strip()))
+    except OSError:
+        pass
+    return out
+
+
+def search(words, limit=8):
+    q = urllib.parse.urlencode({"name": words, "limit": limit, "order": "votes", "reverse": "true",
+                                "hidebroken": "true"})
+    tq = urllib.parse.urlencode({"tag": words.lower(), "limit": limit, "order": "votes", "reverse": "true",
+                                 "hidebroken": "true"})
+    for base in DIRECTORY:
+        try:
+            got = []
+            for path in (f"/json/stations/search?{q}", f"/json/stations/search?{tq}"):
+                req = urllib.request.Request(base + path, headers={"User-Agent": UA})
+                got += json.loads(urllib.request.urlopen(req, timeout=8).read())
+            seen, out = set(), []
+            for s in sorted(got, key=lambda s: -int(s.get("votes") or 0)):
+                url = s.get("url_resolved") or s.get("url")
+                if url and url not in seen and url.startswith(("http://", "https://")):
+                    seen.add(url)
+                    out.append((re.sub(r"\s+", " ", s.get("name", "")).strip()[:60] or url, url))
+            return out[:limit]
+        except Exception:
+            continue
+    raise RuntimeError("the radio directory is not answering")
+
+
+def now():
+    try:
+        pid = int(open(f"{RUN}/pid").read())
+        os.kill(pid, 0)
+        return open(f"{RUN}/now").read().strip()
+    except (OSError, ValueError):
+        return ""
+
+
+def stop():
+    try:
+        pid = int(open(f"{RUN}/pid").read())
+        os.killpg(pid, signal.SIGTERM)
+    except (OSError, ValueError):
+        pass
+    for f in ("pid", "now"):
+        try:
+            os.remove(f"{RUN}/{f}")
+        except OSError:
+            pass
+
+
+def resolve(what):
+    what = what.strip()
+    if re.match(r"^https?://", what):
+        return what, what
+    ms = mine()
+    w = what.lower()
+    for name, url in ms:  # exact, then a part of the name
+        if name.lower() == w:
+            return name, url
+    for name, url in ms:
+        if w in name.lower():
+            return name, url
+    hits = search(what, limit=1)
+    if not hits:
+        raise RuntimeError(f"no station for {what!r}")
+    return hits[0]
+
+
+def play(what):
+    name, url = resolve(what)
+    stop()
+    os.makedirs(RUN, exist_ok=True)
+    player = ["cvlc", "--intf", "dummy", "--no-video", "--quiet", url] if shutil.which("cvlc") else \
+             ["ffplay", "-nodisp", "-loglevel", "quiet", url]
+    p = subprocess.Popen(player, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    time.sleep(2.5)
+    if p.poll() is not None:
+        raise RuntimeError(f"{name} did not play (the stream may be down)")
+    open(f"{RUN}/pid", "w").write(str(p.pid))
+    open(f"{RUN}/now", "w").write(name)
+    return name
+
+
+def pick():
+    """A list to tap: your stations, and Stop when something plays."""
+    rows = []
+    playing = now()
+    if playing:
+        rows += ["■  Stop", f"playing {playing}"]
+    for name, url in mine():
+        rows += [name, ""]
+    rows += ["Find a station…", "search radio-browser.info"]
+    r = subprocess.run(["zenity", "--list", "--title=Radio", "--width=420", "--height=520",
+                        "--column=Station", "--column=", "--hide-header", *rows],
+                       capture_output=True, text=True)
+    choice = r.stdout.strip().split("|")[0]
+    if not choice:
+        return
+    if choice.startswith("■"):
+        stop()
+        return
+    if choice.startswith("Find"):
+        q = subprocess.run(["zenity", "--entry", "--title=Radio", "--text=A station, a town or a kind of music:"],
+                           capture_output=True, text=True).stdout.strip()
+        if not q:
+            return
+        try:
+            hits = search(q)
+        except RuntimeError as e:
+            subprocess.run(["zenity", "--error", f"--text={e}"])
+            return
+        rows = [x for name, url in hits for x in (name, url)]
+        r = subprocess.run(["zenity", "--list", "--title=Radio", "--width=520", "--height=480",
+                            "--column=Station", "--column=Stream", "--hide-header", "--print-column=2", *rows],
+                           capture_output=True, text=True)
+        url = r.stdout.strip().split("|")[0]
+        if not url:
+            return
+        choice = url
+        name = next(n for n, u in hits if u == url)
+        if subprocess.run(["zenity", "--question", f"--text=Add {name} to your stations?"]).returncode == 0:
+            with open(STATIONS, "a") as f:
+                f.write(f"{name} | {url}\n")
+    try:
+        play(choice)
+    except RuntimeError as e:
+        subprocess.run(["zenity", "--error", f"--text={e}"])
+
+
+def main():
+    cmd, rest = (sys.argv[1] if len(sys.argv) > 1 else "pick"), " ".join(sys.argv[2:])
+    try:
+        if cmd == "play":
+            print(f"playing {play(rest)}")
+        elif cmd == "stop":
+            was = now()
+            stop()
+            print(f"stopped {was}" if was else "nothing was playing")
+        elif cmd == "now":
+            print(now() or "nothing is playing")
+        elif cmd == "list":
+            for name, url in mine():
+                print(f"{name} | {url}")
+        elif cmd == "search":
+            for name, url in search(rest):
+                print(f"{name} | {url}")
+        elif cmd == "pick":
+            pick()
+        else:
+            print(__doc__)
+            sys.exit(2)
+    except RuntimeError as e:
+        print(e, file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
