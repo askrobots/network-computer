@@ -27,7 +27,7 @@ Files (only inside the home folder; never overwrites; Trash can be undone)
   nc-desk trash PATH...
 Apps (the dbbasic apps, driven by name through their control socket)
   nc-desk apps                             running dbbasic apps: their actions and state
-  nc-desk app NAME ACTION [JSON-ARGS]      nc-desk app writer insert_text '{"text": "Hi"}'
+  nc-desk app NAME[@PID] ACTION [JSON-ARGS]  nc-desk app writer insert_text '{"text": "Hi"}'
 
 WINDOW is part of a window's title or class, case-insensitive ("firefox",
 "Mousepad"), or an id from `nc-desk windows`.
@@ -344,9 +344,13 @@ def apps():
 
 
 def app(name, action, args="{}"):
+    # NAME@PID: that instance exactly (a release test beside the person's own copy)
+    name, _, pid = name.partition("@")
     paths = app_sockets().get(name.lower())
+    if paths and pid:
+        paths = [p for p in paths if p.endswith(f"-{pid}.sock")]
     if not paths:
-        raise Fail(f"{name} is not running (or has no control); open it first")
+        raise Fail(f"{name}{'@' + pid if pid else ''} is not running (or has no control); open it first")
     try:
         parsed = json.loads(args)
     except ValueError:
