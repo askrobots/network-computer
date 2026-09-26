@@ -1,7 +1,7 @@
 # The dbbasic apps on a desk
 
 The dbbasic office apps (Writer, Spreadsheet, Slides, Draw, Shell, Webmaster,
-Porter) are Flutter apps for macOS and Linux. They are not open source yet, so
+Porter, Cabinet, Dove) are Flutter apps for macOS and Linux. They are not open source yet, so
 desks get their built binaries, never their source. This page is the part that
 is public: where the apps look for shared settings, and how a desk gets them.
 
@@ -158,6 +158,7 @@ infra/apps.sh build writer shell     # build and install (see: infra/apps.sh lis
 | Porter | `dbbasic-porter` | format converter |
 | Draw | `dbbasic-draw` | first Linux build; its OpenAI key is still its own setting |
 | Cabinet | `dbbasic-cabinet` | the paperless office: add, read (OCR), suggest (AI), file; library in ~/Documents/Cabinet |
+| Dove | `dbbasic-dove` | mail, triage first, from any IMAP/SMTP server (address + password in Settings; kept in `~/.config/dbbasic/mail/account.json`, mode 600); new mail as it arrives; voice can list, read, archive and open a filled-in reply, never send |
 
 Known gaps: Draw does not read `ai.env` yet; builds reach only the desk `infra/apps.sh` points at (other people's desks
 need their own build or a copy of `/desk/apps`).

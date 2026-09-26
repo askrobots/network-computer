@@ -25,7 +25,8 @@ draw|dbbasic-draw|DBBASIC Draw|com.dbbasic.draw|dbbasic_draw|Graphics;2DGraphics
 shell|dbbasicshell|DBBASIC Shell|com.dbbasic.shell|basicshell|System;TerminalEmulator;|||A terminal with AI
 webmaster|dbbasic-webmaster|DBBASIC Webmaster|com.dbbasic.webmaster|dbbasic_webmaster|Development;WebDevelopment;|||Build websites
 porter|dbbasic-porter/porter_app|DBBASIC Porter|com.dbbasic.porter|porter|Utility;|||Convert between formats
-cabinet|dbbasic-cabinet|DBBASIC Cabinet|com.dbbasic.cabinet|dbbasic_cabinet|Office;Scanning;OCR;|||The paperless office: scan, read, file'
+cabinet|dbbasic-cabinet|DBBASIC Cabinet|com.dbbasic.cabinet|dbbasic_cabinet|Office;Scanning;OCR;|||The paperless office: scan, read, file
+dove|dbbasic-dove|DBBASIC Dove|com.dbbasic.dove|dove|Network;Email;|||Mail: any mail server, triage first'
 
 row() { echo "$APPS" | awk -F'|' -v n="$1" '$1==n'; }
 IP=$(doctl compute droplet list --format Name,PublicIPv4 --no-header 2>/dev/null | awk -v n="${NC_HOST_NAME:-nc}" '$1==n{print $2}')
@@ -38,7 +39,8 @@ case "$1" in
 set -e
 export DEBIAN_FRONTEND=noninteractive
 apt-get -o DPkg::Lock::Timeout=600 install -y -q clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev \
-  libstdc++-14-dev xz-utils unzip rsync libwebkit2gtk-4.1-dev >/dev/null
+  libstdc++-14-dev xz-utils unzip rsync libwebkit2gtk-4.1-dev \
+  libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev >/dev/null
 id ncbuild >/dev/null 2>&1 || useradd -r -m -d /var/lib/ncbuild -s /bin/bash ncbuild
 have=$(cat /opt/flutter/version 2>/dev/null || runuser -u ncbuild -- /opt/flutter/bin/flutter --version 2>/dev/null | awk 'NR==1{print $2}')
 if [ "$have" != "$FLUTTER_VERSION" ]; then

@@ -557,6 +557,8 @@ Actions, done in order:
                    Writer: write a whole letter or text with one insert_text (blank lines between
                    paragraphs, "# " for a heading); save a new document with save_as, into
                    ~/Objects/<a short name>.dbw unless they say where (suggest_name gives one).
+                   Dove (mail): list, search, read to tell them what came; reply and compose only
+                   open a filled-in message on screen, and they press Send (you cannot send mail).
   {"do": "device", "for": "phone|tablet|desktop|auto"}   lay the desk out for that device
                    (panel, window buttons, text size, launcher; on a phone every window
                    maximized). It follows the device they connect from by itself; use this
