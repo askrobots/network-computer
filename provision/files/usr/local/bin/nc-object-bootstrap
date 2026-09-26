@@ -92,6 +92,13 @@ if [ "$code" != 207 ]; then
   unset KEY
 fi
 
+# where visitors reach published sites (the rendezvous serves /s/ from the
+# object server, -sites): Webmaster reports this address after publishing
+if [ -f "$OSF" ] && [ -n "${NC_DOMAIN:-}" ]; then
+  sed -i '/^DBBASIC_OBJECT_SERVER_PUBLIC_URL=/d' "$OSF"
+  echo "DBBASIC_OBJECT_SERVER_PUBLIC_URL=https://$NC_DOMAIN" >> "$OSF"
+fi
+
 # the voice style from the profile, only if the user hasn't set one
 if [ -s /etc/nc/voice-style.initial ]; then
   T=$(curl -s -X POST -H "Authorization: Token $DBBASIC_ADMIN_TOKEN" -H "Content-Type: application/json" \
