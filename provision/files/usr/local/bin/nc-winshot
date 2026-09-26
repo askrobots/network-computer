@@ -1,0 +1,8 @@
+#!/bin/sh
+# nc-winshot TITLE-PART OUT.png: one window, as it is on screen (for docs and sites)
+set -e
+id=$(xdotool search --onlyvisible --name "$1" | tail -1)
+[ -n "$id" ] || { echo "no window like $1" >&2; exit 1; }
+eval "$(xdotool getwindowgeometry --shell "$id")"
+ffmpeg -hide_banner -loglevel error -y -f x11grab -video_size ${WIDTH}x${HEIGHT} -i "${DISPLAY:-:0}+$X,$Y" -frames:v 1 "$2"
+echo "$2 ${WIDTH}x${HEIGHT}"
