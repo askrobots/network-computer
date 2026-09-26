@@ -1096,10 +1096,11 @@ class Voice:
         except Exception:
             pass
 
-    def task(self, text, mark):
-        """One request, in up to MAX_STEPS rounds of think, act, (look)."""
+    def task(self, text, mark, attach=None, note=""):
+        """One request, in up to MAX_STEPS rounds of think, act, (look). [attach]:
+        a picture that goes with the request from the start (a stream's frame)."""
         turns = list(self.history[-12:])
-        message, attach, scale, final = text + "\n\n" + context(), None, None, ""
+        message, scale, final = text + (f"\n{note}" if note else "") + "\n\n" + context(), None, ""
         for step in range(MAX_STEPS):
             try:
                 reply = self.obj.chat(message, turns, style(), attachments=attach)
@@ -1185,11 +1186,25 @@ class Voice:
             if self.talkback:
                 self.talkback.notice(f"heard: {text}", 3)
             t = [("start", time.monotonic())]
+            mark = lambda n: t.append((n, time.monotonic()))
             if self.pending:
                 self.answer_pending(text)
             else:
-                self.task(f"[The user, on their own live stream {name}] {text}",
-                          lambda n: t.append((n, time.monotonic())))
+                # about what the camera sees: the picture goes with the question, one round trip
+                attach, note = None, ""
+                if SEEING.search(text):
+                    try:
+                        jpg = desk_run(["nc-stream", "look", name])
+                        with open(jpg, "rb") as f:
+                            attach = [self.obj.upload("stream.jpg", f.read(), "image/jpeg")]
+                        os.remove(jpg)
+                        note = f"[Attached: the live stream {name} as it is now: their camera, not the desk's screen.]"
+                    except Exception as e:
+                        note = f"[Could not see the stream {name}: {e}]"
+                    mark("look")
+                self.task(f"[The user, on their own live stream {name}; they hear you in an earpiece: "
+                          f"one short sentence] {text}", mark, attach=attach, note=note)
+            log(f"stream timing: " + " ".join(f"{n} {b - a:.1f}" for (_, a), (n, b) in zip(t, t[1:])))
         finally:
             self.reply_stream = None
 
@@ -1233,14 +1248,15 @@ class Voice:
             self.speak("Okay, I won't.", on_start=lambda: event("said", "Okay, I won't."))
 
     def speak(self, text, mark=lambda name: None, on_start=lambda: None):
-        if self.reply_stream and self.talkback:   # asked on a live stream: the answer goes back to it
-            try:
-                self.talkback.say(text)
-            except Exception as e:
-                log(f"talkback: {e}")
         self.speaking.set()
         try:
-            if self.piper:   # stream: the first sentence plays while the rest is made
+            if self.piper and self.reply_stream and self.talkback:
+                # asked on a live stream: made once, sent to the phone, played here
+                pcm, rate, _ = self.talkback.say_pcm(text)
+                mark("voice")
+                on_start()
+                player(rate).communicate(pcm, timeout=120)
+            elif self.piper:   # stream: the first sentence plays while the rest is made
                 rate = self.piper.config.sample_rate
                 p = player(rate)
                 started = None
@@ -1470,6 +1486,9 @@ def serve_helper():
 # the desk user's: ~/.config/nc/stream-ai.env (nc-stream ears|eyes).
 
 STREAM_API = "http://127.0.0.1:9997/v3/paths/list"
+# a request about what the camera sees: the stream's picture goes with it
+SEEING = re.compile(r"\b(see|seeing|look|looking|watch|camera|picture|in front of|read (this|that|it)|"
+                    r"what('s| is) (this|that|here|there)|who('s| is))\b", re.I)
 TALKBACK_PORT = 8078
 
 
@@ -1523,9 +1542,11 @@ class Talkback:
         return event
 
     def say(self, text):
+        return self.say_pcm(text)[2] if text.strip() else None
+
+    def say_pcm(self, text):
+        """-> (pcm, rate, event): the line made once, queued for the phone."""
         text = text.strip()[:1000]
-        if not text:
-            return None
         v = self.voice.piper
         with self.synth:
             pcm = b"".join(c.audio_int16_bytes for c in v.synthesize(text))
@@ -1536,8 +1557,8 @@ class Talkback:
             w.setsampwidth(2)
             w.setframerate(rate)
             w.writeframes(pcm)
-        return self._add({"type": "voice", "text": text, "audioPath": f"audio/{name}",
-                          "createdAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
+        return pcm, rate, self._add({"type": "voice", "text": text, "audioPath": f"audio/{name}",
+                                     "createdAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
 
     def notice(self, text, seconds=4):
         return self._add({"type": "notice", "text": text.strip()[:300], "displaySeconds": max(1, min(15, seconds)),
