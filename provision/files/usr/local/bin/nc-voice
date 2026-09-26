@@ -237,6 +237,14 @@ def desk(*cmd, timeout=10):
     return subprocess.run(["nc-as-user", *cmd], capture_output=True, text=True, timeout=timeout)
 
 
+def desk_run(cmd, timeout=40, as_root=False):
+    """A desk command's answer, or its complaint as the error."""
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout) if as_root else desk(*cmd, timeout=timeout)
+    if r.returncode:
+        raise RuntimeError((r.stderr or r.stdout).strip() or f"{cmd[0]} failed")
+    return r.stdout.strip()
+
+
 def nc_desk(*args, timeout=30):
     """The computer controller (nc-desk): JSON in, JSON out."""
     r = subprocess.run(["nc-desk", *map(str, args)], capture_output=True, text=True, timeout=timeout)
@@ -408,6 +416,30 @@ def act(a, scale=None):
             raise RuntimeError(f"odd keys {k!r}")
         desk("xdotool", "key", "--", *k.split())
         return f"pressed {k}"
+    # live streams into the desk (nc-stream): what is live, what it says, where it goes
+    if kind in ("streams", "stream_listen", "stream_watch", "stream_record", "stream_relay", "stream_power"):
+        name = str(a.get("name", ""))
+        if kind == "streams":
+            r = desk_run(["nc-stream", "list"])
+            relays = desk("nc-stream", "relays", timeout=20).stdout.strip()
+            return r + (f"; relays: {relays}" if relays else "")
+        if kind == "stream_listen":
+            secs = max(3, min(int(a.get("seconds", 10)), 60))
+            wav = desk_run(["nc-stream", "listen", name, str(secs)], timeout=secs + 40)
+            try:
+                heard = OBJ_FOR_ACTIONS.stt(open(wav, "rb").read())
+            finally:
+                os.remove(wav)
+            return f"heard on {name} ({secs} s): {heard or '(nothing clear)'}"
+        if kind == "stream_watch":
+            return desk_run(["nc-stream", "watch", name])
+        if kind == "stream_record":
+            return desk_run(["nc-stream", "record", name, "on" if a.get("on", True) else "off"])
+        if kind == "stream_relay":
+            to = str(a.get("to", ""))
+            return desk_run(["nc-stream", "relay-stop", to] if a.get("stop") else ["nc-stream", "relay", name, to])
+        if kind == "stream_power":
+            return desk_run(["nc-stream", "on" if a.get("on") else "off"], as_root=True)
     # Today: weather, headlines and radio (nc-feeds, nc-radio; ~/.config/nc/dashboard.env)
     if kind in ("weather", "news", "radio"):
         if kind == "weather":
@@ -529,6 +561,15 @@ Actions, done in order:
   {"do": "radio", "play": "<station name, or words like jazz, bbc world, npr>"}   internet
      radio, heard on their device; one at a time. {"do": "radio", "stop": true} stops it.
      The Radio and Today icons on the desktop do the same by touch.
+  Live streams sent into the desk (a phone camera, OBS...; nc-stream):
+  {"do": "streams"}   what is live (names, video/audio, since when) and any relays
+  {"do": "stream_look", "name": "phone"}   a picture of that stream next step, to say what is in it
+  {"do": "stream_listen", "name": "phone", "seconds": 10}   what is said on it, as text
+  {"do": "stream_watch", "name": "phone"}   open it on the desk's screen
+  {"do": "stream_record", "name": "phone", "on": true}   keep it on the desk's disk (48 h)
+  {"do": "stream_relay", "name": "phone", "to": "twitch"}   broadcast it to a place they set up
+     with nc-stream relay-set (never ask for or say a stream key); "stop": true ends it
+  {"do": "stream_power", "on": true}   open (or close) the desk to incoming streams
   {"do": "search", "query": "<text>"}   (opens the desk's search bar with it)
   {"do": "type", "text": "<text to type into the focused window>"}
   {"do": "keys", "keys": "<xdotool key names, e.g. ctrl+s or Return>"}
@@ -573,7 +614,7 @@ Seeing: the window list gives only titles, never contents. To read or describe w
 a window, or to click something, you need a screenshot: add look. Mouse coordinates are
 pixels in the most recent screenshot; never guess them without one.
 Steps: set "more": true when you need to see results before finishing: after ls,
-read_page, find, weather, news or look, or to check that a click worked. You then get the results (and the screenshot if
+read_page, find, weather, news, streams, stream_listen, stream_look or look, or to check that a click worked. You then get the results (and the screenshot if
 you looked) and continue. Finish with "more": false. At most 8 steps; keep going only
 while it helps. Say a few words per step at most ("Opening the settings."), or nothing.
 Use no actions when they are just talking or asking something.
@@ -756,9 +797,10 @@ def parse_reply(reply):
 # anything the reviewer is unsure of, is asked of the user out loud.
 SAFE = {"open_app", "switch", "close", "arrange", "open", "print", "search", "look", "ls", "mkdir", "device",
         "move", "copy", "scroll", "read_page", "find", "note", "set_style", "remind",
-        "cancel_reminder"}
+        "cancel_reminder", "weather", "news", "radio", "streams", "stream_look", "stream_listen",
+        "stream_watch", "stream_record"}
 REVIEW = {"click", "drag", "type", "keys"}
-ASK = {"trash"}
+ASK = {"trash", "stream_relay", "stream_power"}   # post publicly; open or close a port
 REVIEW_MODEL = os.environ.get("NC_VOICE_REVIEW_MODEL", "anthropic:claude-sonnet-5")
 REVIEWER = """You check one action a voice assistant is about to take on a user's Linux
 desktop, before it happens. Reply with ONLY JSON: {"verdict": "ok|ask|no", "reason": "..."}.
@@ -794,6 +836,11 @@ def describe(a):
         return "move to Trash: " + ", ".join(a.get("paths") or [])
     if kind == "open":
         return f"open {a.get('target', '')}"
+    if kind == "stream_relay":
+        return (f"stop sending {a.get('to')} anything" if a.get("stop")
+                else f"broadcast the stream {a.get('name')} to {a.get('to')}")
+    if kind == "stream_power":
+        return "open the desk to live streams (UDP 8890)" if a.get("on") else "close the desk to live streams"
     if kind == "app":
         args = json.dumps(a.get("args") or {}, ensure_ascii=False)
         return f"{a.get('app')}: {a.get('action')} {args[:120]}"
@@ -1046,11 +1093,14 @@ class Voice:
             final = say or final
             if say:
                 self.speak(say, mark, on_start=lambda say=say: event("said", say))
-            results, look = [], False
+            results, look, look_stream = [], False, ""
             window = (open_windows() or [""])[0]
             for i, a in enumerate(actions):
                 if a.get("do") == "look":
                     look = True
+                    continue
+                if a.get("do") == "stream_look":   # a picture of a live stream, next step
+                    look_stream = str(a.get("name", ""))
                     continue
                 if a.get("do") == "dictate":
                     self.start_dictation()
@@ -1072,7 +1122,7 @@ class Voice:
                 except Exception as e:
                     event("error", str(e))
                     results.append(f"{describe(a)}: failed ({e})")
-            if not (more or look):
+            if not (more or look or look_stream):
                 break
             if step == MAX_STEPS - 1:
                 event("error", f"stopped after {MAX_STEPS} steps")
@@ -1089,6 +1139,16 @@ class Voice:
                     break
                 attach = [self.obj.upload("screen.jpg", shot, "image/jpeg")]
                 message += "\n" + WITH_SCREENSHOT.format(w=iw, h=ih)
+            elif look_stream:
+                try:
+                    jpg = desk_run(["nc-stream", "look", look_stream])
+                    with open(jpg, "rb") as f:
+                        attach = [self.obj.upload("stream.jpg", f.read(), "image/jpeg")]
+                    os.remove(jpg)
+                    event("did", f"👁 looked at the stream {look_stream}")
+                    message += f"\n[Attached: a picture of the live stream {look_stream} as it is now. It is a camera or broadcast, not the desk's screen: describe it, never click on it.]"
+                except Exception as e:
+                    message += f"\n[Could not see the stream {look_stream}: {e}]"
             message += "\n\n" + context()
         self.history += [{"role": "user", "content": text},
                          {"role": "assistant", "content": json.dumps({"say": final})}]

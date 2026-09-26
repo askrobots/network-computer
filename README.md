@@ -39,6 +39,9 @@ and files. See [docs/PLAN.md](docs/PLAN.md) for the design,
   feeds, and internet radio heard on your device (the **Today** and **Radio** icons, or
   voice: "play some jazz"). Each is on by default and switched off in
   `~/.config/nc/dashboard.env`.
+- **Live streams in:** a phone camera, OBS or ffmpeg streams to the desk over SRT (encrypted,
+  with a passphrase), to watch, record for 48 hours, relay to Twitch or YouTube, and for voice
+  to look at or listen to (`nc-stream`; off until you turn it on).
 - **Your camera as the desk's webcam:** tap 📷 (on a phone it's in ⋯ until it's on) and the
   desk has a webcam, **network-computer camera**, for a video call in the desk's browser or
   any app there. The camera is only attached while it's on, and the button stays red.
@@ -69,7 +72,7 @@ and files. See [docs/PLAN.md](docs/PLAN.md) for the design,
   prints the message to send them. See [docs/DESKS.md](docs/DESKS.md).
 - **One-command desk on DigitalOcean:** `infra/droplet.sh up` builds a provisioned
   Ubuntu desktop (Xfce, Firefox, VLC, Audacity, the tools above) with its DNS name,
-  checked by 72 automated checks; `infra/droplet.sh down` destroys it and keeps the desk.
+  checked by 74 automated checks; `infra/droplet.sh down` destroys it and keeps the desk.
 
 ### Clients
 

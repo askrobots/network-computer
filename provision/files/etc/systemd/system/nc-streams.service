@@ -1,0 +1,22 @@
+[Unit]
+Description=Network Computer live streams (MediaMTX: SRT in, watch and record on the desk)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=nc-streams
+Group=nc-streams
+EnvironmentFile=/etc/nc/streams.env
+# no passphrase, no service: SRT would otherwise accept any publisher
+ExecStartPre=/bin/sh -c 'test $${#MTX_PATHDEFAULTS_SRTPUBLISHPASSPHRASE} -ge 10 || { echo "no passphrase in /etc/nc/streams.env: nc-stream on makes one" >&2; exit 1; }'
+ExecStart=/usr/local/bin/mediamtx /etc/nc/mediamtx.yml
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/nc-streams
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -82,10 +82,11 @@ deps() {
     host)       echo /etc/systemd/system/nc-host.service /etc/systemd/system/nc-host.service.d/*.conf /usr/local/bin/nc-host /etc/nc/env ;;
     object-server) echo /etc/systemd/system/nc-object-server.service /etc/systemd/system/nc-object-server.service.d/*.conf /etc/nc/object-server.env /opt/dbbasic-object-server/.git/HEAD /opt/dbbasic-object-server/.git/refs/heads/main ;;
     object-daemon) echo /etc/systemd/system/nc-object-daemon.service /etc/systemd/system/nc-object-daemon.service.d/*.conf /etc/nc/object-server.env /opt/dbbasic-object-server/.git/refs/heads/main ;;
+    streams)    echo /etc/systemd/system/nc-streams.service /etc/nc/mediamtx.yml /usr/local/bin/mediamtx /etc/nc/streams.env ;;
     voice)      echo /etc/systemd/system/nc-voice.service /etc/systemd/system/nc-voice.service.d/*.conf /usr/local/bin/nc-voice /etc/nc/object-server.env /opt/piper/voices/en_US-lessac-medium.onnx.json ;;
   esac
 }
-snapshot() { for s in xorg desktop audio rendezvous host object-server object-daemon voice; do echo "$s $(cat $(deps $s) 2>/dev/null | md5sum | cut -c1-12)"; done; }
+snapshot() { for s in xorg desktop audio rendezvous host object-server object-daemon voice streams; do echo "$s $(cat $(deps $s) 2>/dev/null | md5sum | cut -c1-12)"; done; }
 BEFORE=$(snapshot)
 
 echo ">> memory: swap, so a spike slows the desk down instead of freezing it"
@@ -273,6 +274,30 @@ usermod -aG video "$NC_DESK_USER"
 printf 'SUBSYSTEM=="video4linux", ATTR{name}=="network-computer camera", OWNER="%s", GROUP="video", MODE="0660", RUN+="/usr/bin/v4l2-ctl -d $devnode -c keep_format=1"\n' "$NC_DESK_USER" > /etc/udev/rules.d/70-nc-camera.rules
 udevadm control --reload; udevadm trigger --subsystem-match=video4linux 2>/dev/null || true
 
+echo ">> live streams: SRT into the desk (off until nc-stream on)"
+MTX_V=1.20.0
+if [ "$(/usr/local/bin/mediamtx --version 2>/dev/null)" != "v$MTX_V" ]; then
+  t=$(mktemp -d)
+  curl -fsSL -o $t/m.tgz https://github.com/bluenviron/mediamtx/releases/download/v$MTX_V/mediamtx_v${MTX_V}_linux_amd64.tar.gz
+  curl -fsSL -o $t/sums https://github.com/bluenviron/mediamtx/releases/download/v$MTX_V/checksums.sha256
+  want=$(grep "linux_amd64.tar.gz" $t/sums | awk '{print $1}')
+  [ -n "$want" ] && [ "$(sha256sum $t/m.tgz | awk '{print $1}')" = "$want" ] || { echo "!! mediamtx checksum mismatch"; exit 1; }
+  tar -xzf $t/m.tgz -C $t mediamtx && install -m 0755 $t/mediamtx /usr/local/bin/mediamtx
+  rm -rf $t
+fi
+id nc-streams >/dev/null 2>&1 || useradd -r -M -d /var/lib/nc-streams -s /usr/sbin/nologin nc-streams
+# the recordings are the desk user's streams: readable, written only by the service
+install -d -o nc-streams -g nc-streams -m 0755 /var/lib/nc-streams /var/lib/nc-streams/recordings
+# the passphrase lives with the desk (a new computer keeps it); relay keys are
+# the desk user's own, in ~/.config/nc/stream-relays (on the desk already)
+if [ -n "${DESK:-}" ]; then
+  [ -e /desk/nc/streams.env ] || { [ -f /etc/nc/streams.env ] && [ ! -L /etc/nc/streams.env ] && mv /etc/nc/streams.env /desk/nc/; } || true
+  [ -L /etc/nc/streams.env ] || { [ -e /desk/nc/streams.env ] || touch /desk/nc/streams.env; rm -f /etc/nc/streams.env; ln -s /desk/nc/streams.env /etc/nc/streams.env; }
+  chown root:"$NC_DESK_USER" /desk/nc/streams.env; chmod 0640 /desk/nc/streams.env
+fi
+# on only if someone turned it on (nc-stream on): opening a port is their choice
+if systemctl is-enabled --quiet nc-streams 2>/dev/null; then ufw allow 8890/udp >/dev/null; fi
+
 echo ">> printing: \"My device\" prints on the device you are connected from"
 # CUPS (local only), a queue whose backend (ncdevice) hands each job as a PDF
 # to nc-host, and it is the default printer: File > Print in any app reaches
@@ -416,7 +441,7 @@ done
 echo ">> services"
 AFTER=$(snapshot)
 systemctl daemon-reload
-for s in xorg desktop audio rendezvous host object-server object-daemon voice; do
+for s in xorg desktop audio rendezvous host object-server object-daemon voice streams; do
   was=$(echo "$BEFORE" | awk -v s=$s '$1==s{print $2}')
   now=$(echo "$AFTER"  | awk -v s=$s '$1==s{print $2}')
   if [ "$was" != "$now" ] && systemctl is-active --quiet nc-$s; then

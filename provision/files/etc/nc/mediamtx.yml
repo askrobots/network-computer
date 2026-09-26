@@ -1,0 +1,74 @@
+# Live streams into the desk (nc-stream; MediaMTX runs as nc-streams).
+#
+# The one door from outside is SRT on UDP 8890, for publishing only, and only
+# with the passphrase in /etc/nc/streams.env (MTX_PATHDEFAULTS_SRTPUBLISHPASSPHRASE;
+# SRT also encrypts the stream with it). Everything else listens on this
+# computer only: watching (HLS, WebRTC, RTSP) is for the desk's own browser
+# and tools, the API and metrics for nc-stream. Any stream name works:
+# srt://<desk>:8890?streamid=publish:<name>&passphrase=<passphrase>
+logLevel: info
+logDestinations: [stdout]
+
+authMethod: internal
+authInternalUsers:
+  # anyone may try to publish; SRT turns them away without the passphrase,
+  # and SRT is the only protocol reachable from outside
+  - user: any
+    pass:
+    ips: []
+    permissions:
+      - action: publish
+        path:
+  # watching, recordings, the API: this computer only
+  - user: any
+    pass:
+    ips: ["127.0.0.1", "::1"]
+    permissions:
+      - action: read
+        path:
+      - action: playback
+        path:
+      - action: api
+      - action: metrics
+
+api: true
+apiAddress: 127.0.0.1:9997
+metrics: true
+metricsAddress: 127.0.0.1:9998
+pprof: false
+playback: true
+playbackAddress: 127.0.0.1:9996
+
+rtsp: true
+rtspTransports: [tcp]
+rtspAddress: 127.0.0.1:8554
+rtmp: false
+moq: false
+hls: true
+hlsAddress: 127.0.0.1:8888
+hlsAlwaysRemux: true
+hlsVariant: lowLatency
+hlsSegmentCount: 7
+hlsSegmentDuration: 1s
+hlsPartDuration: 200ms
+webrtc: true
+webrtcAddress: 127.0.0.1:8889
+webrtcLocalUDPAddress: 127.0.0.1:8189
+webrtcIPsFromInterfaces: false
+webrtcAdditionalHosts: [127.0.0.1]
+
+srt: true
+srtAddress: :8890
+
+pathDefaults:
+  source: publisher
+  # recording is per stream (nc-stream record NAME on), on the computer's own
+  # disk (the desk volume is small), deleted after two days
+  record: false
+  recordPath: /var/lib/nc-streams/recordings/%path/%Y-%m-%d_%H-%M-%S-%f
+  recordFormat: fmp4
+  recordSegmentDuration: 10m
+  recordDeleteAfter: 48h
+
+paths:
+  all_others:

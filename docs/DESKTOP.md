@@ -346,3 +346,27 @@ The round trip (your camera to the desk, the call's picture back to you in the d
 adds some delay: fine for calls, not a mirror. Connecting other people (chat, invites) comes
 later, with remote support ([REMOTE-SUPPORT.md](REMOTE-SUPPORT.md)).
 
+## Live streams into the desk (2026-09-26)
+
+A phone (the SRT Stream app), OBS or ffmpeg can send a live stream to the desk
+over SRT, from anywhere: `srt://<desk domain>:8890?streamid=publish:<name>&passphrase=<passphrase>`.
+Any name works, and several streams can come in at once. MediaMTX receives them
+(`nc-streams.service`, its own user); it is off until `nc-stream on` (root, or
+ask voice), which makes the passphrase, opens UDP 8890 and starts it. SRT
+encrypts with the passphrase and turns away anyone without it; that is the one
+door from outside. Watching, recordings and the API are on the desk only.
+
+- `nc-stream key` shows the passphrase and the address to put in the sender.
+- `nc-stream list`: what is live. `watch NAME` opens it in the desk's browser.
+- `look NAME` a picture of it now; `listen NAME 10` ten seconds of its sound.
+  Voice uses both: "what's on the phone stream?", "what are they saying?" (the
+  object server's speech to text).
+- `record NAME on`: 10-minute files on the computer's disk (not the small desk
+  volume), deleted after 48 hours, in `/var/lib/nc-streams/recordings/NAME`.
+- Twitch, YouTube, any RTMP: `nc-stream relay-set twitch` reads the address
+  with its stream key from the input and keeps it in
+  `~/.config/nc/stream-relays/` (yours, 0600, never shown again); `nc-stream
+  relay phone twitch` sends the stream on as it comes (no re-encoding) and keeps
+  at it if either end drops; `relay-stop twitch` ends it. Voice asks before it
+  broadcasts, and never asks for a key.
+

@@ -1,0 +1,309 @@
+#!/usr/bin/env python3
+"""Live streams into the desk: a phone (the SRT Stream app), OBS, ffmpeg...
+MediaMTX receives them (nc-streams.service); this is the one command for
+people, voice and scripts.
+
+    nc-stream on | off              open or close the door (UDP 8890, SRT with a passphrase)  [root]
+    nc-stream key                   the passphrase, and the address to put in the sender
+    nc-stream list                  what is live: name, video/audio, how long, how much
+    nc-stream look NAME [OUT.jpg]   a picture of the stream as it is now (for AI, or a person)
+    nc-stream listen NAME [SECONDS] [OUT.wav]   what it says: a clip of its sound (16 kHz mono)
+    nc-stream watch NAME            open it in the desk's browser
+    nc-stream record NAME on|off    keep it on the computer's disk (48 h), in 10-minute files
+    nc-stream recordings [NAME]     what is kept
+    nc-stream relay-set TO          keep where TO is (Twitch, YouTube...): its rtmp[s]:// address
+                                    with the stream key, read from the input, never an argument
+    nc-stream relay NAME TO         send the stream on to TO, as it comes (no re-encoding)
+    nc-stream relay-stop TO | relays
+
+The passphrase is in /etc/nc/streams.env (root and the desk user). Relay
+addresses, with their stream keys, are the desk user's own:
+~/.config/nc/stream-relays/TO.url (0600), never printed; relays run as that
+user and start again if either end drops. Everything but SRT publishing is on
+this computer only.
+"""
+import json, os, pathlib, re, secrets, subprocess, sys, time, urllib.request
+
+ENV = "/etc/nc/streams.env"
+API = "http://127.0.0.1:9997/v3"
+RTSP = "rtsp://127.0.0.1:8554"
+PORT = 8890
+
+
+def info(key):
+    try:
+        for line in open("/etc/nc/info"):
+            if line.startswith(key + "="):
+                return line.split("=", 1)[1].strip().strip('"')
+    except OSError:
+        pass
+    return ""
+
+
+def desk_user():
+    try:
+        for line in open("/etc/nc/env"):
+            if line.startswith("NC_DESK_USER="):
+                return line.split("=", 1)[1].strip().strip('"')
+    except OSError:
+        pass
+    return os.environ.get("USER", "")
+
+
+def die(msg, code=1):
+    print(msg, file=sys.stderr)
+    sys.exit(code)
+
+
+def need_root():
+    if os.geteuid() != 0:
+        die("this needs root (ask voice, or ssh in as root)")
+
+
+def passphrase():
+    try:
+        for line in open(ENV):
+            if line.startswith("MTX_PATHDEFAULTS_SRTPUBLISHPASSPHRASE="):
+                return line.split("=", 1)[1].strip()
+    except PermissionError:
+        die(f"{ENV} is for root and the desk user")
+    except OSError:
+        pass
+    return ""
+
+
+def api(path, method="GET", body=None):
+    req = urllib.request.Request(API + path, method=method,
+                                 data=json.dumps(body).encode() if body is not None else None,
+                                 headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=5) as r:
+            data = r.read()
+            return json.loads(data) if data else {}
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"{e.code} {e.read().decode(errors='replace')[:200]}")
+    except OSError:
+        die("streams are off (nc-stream on)")
+
+
+def sender_url(name="phone"):
+    host = info("NC_DOMAIN") or info("NC_PUBLIC_IP") or "this-desk"
+    return f"srt://{host}:{PORT}?streamid=publish:{name}&passphrase=<passphrase>"
+
+
+def cmd_on():
+    need_root()
+    key = passphrase()
+    if len(key) < 10:
+        key = secrets.token_urlsafe(18)  # 24 characters; SRT takes 10 to 79
+        user = desk_user()
+        pathlib.Path(ENV).write_text(f"MTX_PATHDEFAULTS_SRTPUBLISHPASSPHRASE={key}\n")
+        os.chmod(ENV, 0o640)
+        if user:
+            subprocess.run(["chgrp", user, ENV], check=False)
+    subprocess.run(["ufw", "allow", f"{PORT}/udp"], capture_output=True)
+    r = subprocess.run(["systemctl", "enable", "--now", "nc-streams"], capture_output=True, text=True)
+    if r.returncode:
+        die(r.stderr.strip())
+    print(f"streams on: {sender_url()}\n(nc-stream key shows the passphrase)")
+
+
+def cmd_off():
+    need_root()
+    for f in relay_dir().glob("*.url") if relay_dir().exists() else []:
+        cmd_relay_stop(f.stem, quiet=True)
+    subprocess.run(["systemctl", "disable", "--now", "nc-streams"], capture_output=True)
+    subprocess.run(["ufw", "delete", "allow", f"{PORT}/udp"], capture_output=True)
+    print("streams off: UDP 8890 closed")
+
+
+def cmd_key():
+    key = passphrase()
+    if not key:
+        die("no passphrase yet: nc-stream on")
+    host = info("NC_DOMAIN") or info("NC_PUBLIC_IP")
+    print(f"host        {host}\nport        {PORT}\nstream name any, e.g. phone\npassphrase  {key}\n"
+          f"address     srt://{host}:{PORT}?streamid=publish:phone&passphrase={key}")
+
+
+def live():
+    return api("/paths/list").get("items", [])
+
+
+def cmd_list(as_json=False):
+    items = live()
+    out = []
+    for p in items:
+        tracks = p.get("tracks") or []
+        since = p.get("readyTime") or ""
+        out.append({"name": p["name"], "live": bool(p.get("ready")), "tracks": tracks,
+                    "since": since, "received_mb": round((p.get("bytesReceived") or 0) / 1e6, 1),
+                    "watchers": len(p.get("readers") or [])})
+    if as_json:
+        print(json.dumps(out))
+        return
+    if not out:
+        print("nothing is live")
+    for s in out:
+        print(f"{s['name']:<16} {'live' if s['live'] else 'waiting':<8} {','.join(s['tracks']):<14} "
+              f"{s['received_mb']:>8} MB  since {s['since'][:19].replace('T', ' ')}")
+
+
+def ensure_live(name):
+    for p in live():
+        if p["name"] == name and p.get("ready"):
+            return p
+    names = [p["name"] for p in live() if p.get("ready")]
+    die(f"no live stream {name!r}" + (f" (live: {', '.join(names)})" if names else " (nothing is live)"))
+
+
+def safe(name):
+    if not re.fullmatch(r"[A-Za-z0-9._~-]{1,64}", name or ""):
+        die(f"odd stream name {name!r}")
+    return name
+
+
+def cmd_look(name, out=None):
+    ensure_live(safe(name))
+    out = out or f"/tmp/nc-stream-{name}-{int(time.time())}.jpg"
+    r = subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-rtsp_transport", "tcp",
+                        "-i", f"{RTSP}/{name}", "-frames:v", "1", "-vf", "scale='min(1280,iw)':-2", "-q:v", "3", out],
+                       capture_output=True, text=True, timeout=30)
+    if r.returncode or not os.path.exists(out):
+        die(f"no picture from {name}: {r.stderr.strip()[:200]}")
+    print(out)
+
+
+def cmd_listen(name, seconds="8", out=None):
+    ensure_live(safe(name))
+    s = max(1, min(int(seconds), 120))
+    out = out or f"/tmp/nc-stream-{name}-{int(time.time())}.wav"
+    r = subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-rtsp_transport", "tcp",
+                        "-i", f"{RTSP}/{name}", "-t", str(s), "-vn", "-ac", "1", "-ar", "16000", out],
+                       capture_output=True, text=True, timeout=s + 30)
+    if r.returncode or not os.path.exists(out):
+        die(f"no sound from {name}: {r.stderr.strip()[:200]}")
+    print(out)
+
+
+def cmd_watch(name):
+    ensure_live(safe(name))
+    url = f"http://127.0.0.1:8888/{name}/"
+    run = ["xdg-open", url] if os.geteuid() else ["nc-as-user", "xdg-open", url]
+    subprocess.Popen(run, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    print(f"opened {url}")
+
+
+def cmd_record(name, onoff):
+    safe(name)
+    on = onoff == "on"
+    try:
+        api(f"/config/paths/patch/{name}", "PATCH", {"record": on})
+    except RuntimeError:
+        api(f"/config/paths/add/{name}", "POST", {"record": on})  # not configured yet: add it
+    print(f"{name}: {'recording, 10-minute files kept 48 h' if on else 'not recording'}")
+
+
+def cmd_recordings(name=None):
+    root = pathlib.Path("/var/lib/nc-streams/recordings")
+    dirs = [root / name] if name else sorted(p for p in root.glob("*") if p.is_dir())
+    for d in dirs:
+        files = sorted(d.glob("*.mp4"))
+        if files:
+            mb = sum(f.stat().st_size for f in files) / 1e6
+            print(f"{d.name}: {len(files)} file(s), {mb:.0f} MB, newest {files[-1].name}")
+    if not any(root.glob("*/*.mp4")):
+        print("no recordings")
+
+
+def relay_dir():
+    """The desk user's relay addresses (root acts for them: voice)."""
+    home = os.path.expanduser("~") if os.geteuid() else f"/home/{desk_user()}"
+    return pathlib.Path(home) / ".config/nc/stream-relays"
+
+
+def as_user(cmd):
+    return cmd if os.geteuid() else ["nc-as-user", *cmd]
+
+
+def cmd_relay_set(to):
+    if os.geteuid() == 0:
+        die("relay-set is the desk user's (their stream keys): run it as them")
+    url = sys.stdin.readline().strip()
+    if not re.match(r"^rtmps?://\S+$", url):
+        die("give the rtmp:// or rtmps:// address with the stream key, e.g. rtmp://live.twitch.tv/app/<key>")
+    d = relay_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    os.chmod(d, 0o700)
+    f = d / f"{safe(to)}.url"
+    f.write_text(url + "\n")
+    os.chmod(f, 0o600)
+    host = re.sub(r"^(rtmps?://[^/]+).*", r"\1", url)
+    print(f"kept {to}: {host}/… (nc-stream relay NAME {to})")
+
+
+def cmd_relay(name, to):
+    safe(name), safe(to)
+    f = relay_dir() / f"{to}.url"
+    if not f.exists():
+        die(f"no address for {to} yet: nc-stream relay-set {to} (then paste its rtmp address with the key)")
+    ensure_live(name)
+    cmd_relay_stop(to, quiet=True)
+    # as it comes, no re-encoding (almost free); again every 5 s if either end drops
+    loop = (f'while :; do ffmpeg -hide_banner -loglevel warning -rtsp_transport tcp -i {RTSP}/{name} '
+            f'-c copy -f flv "$(cat {f})"; sleep 5; done')
+    run = f'mkdir -p "$XDG_RUNTIME_DIR/nc-relays"; setsid sh -c \'{loop}\' >/dev/null 2>&1 & echo $! > "$XDG_RUNTIME_DIR/nc-relays/{to}.pid"; echo {name} > "$XDG_RUNTIME_DIR/nc-relays/{to}.from"'
+    r = subprocess.run(as_user(["sh", "-c", run]), capture_output=True, text=True)
+    if r.returncode:
+        die(r.stderr.strip())
+    print(f"relaying {name} to {to} (nc-stream relay-stop {to} ends it)")
+
+
+def cmd_relay_stop(to, quiet=False):
+    safe(to)
+    run = (f'p="$XDG_RUNTIME_DIR/nc-relays/{to}.pid"; [ -f "$p" ] && kill -- -$(cat "$p") 2>/dev/null; '
+           f'rm -f "$p" "$XDG_RUNTIME_DIR/nc-relays/{to}.from"')
+    subprocess.run(as_user(["sh", "-c", run]), capture_output=True)
+    if not quiet:
+        print(f"relay to {to} stopped")
+
+
+def cmd_relays():
+    run = ('for f in "$XDG_RUNTIME_DIR"/nc-relays/*.pid; do [ -f "$f" ] || continue; t=$(basename "$f" .pid); '
+           'kill -0 $(cat "$f") 2>/dev/null && s=running || s=stopped; echo "$t $s $(cat "${f%.pid}.from" 2>/dev/null)"; done')
+    out = subprocess.run(as_user(["sh", "-c", run]), capture_output=True, text=True).stdout.split("\n")
+    kept = sorted(p.stem for p in relay_dir().glob("*.url")) if relay_dir().exists() else []
+    live = {l.split()[0]: l.split()[1:] for l in out if l.strip()}
+    if not kept:
+        print("no relays kept (nc-stream relay-set TO)")
+    for t in kept:
+        st, frm = (live.get(t) + [""])[:2] if t in live else ("idle", "")
+        print(f"{t:<12} {st:<8} {('from ' + frm) if frm else ''}")
+
+
+def main():
+    a = sys.argv[1:]
+    if not a:
+        print(__doc__)
+        return
+    c, rest = a[0], a[1:]
+    table = {
+        "on": (cmd_on, 0), "off": (cmd_off, 0), "key": (cmd_key, 0), "look": (cmd_look, 1),
+        "listen": (cmd_listen, 1), "watch": (cmd_watch, 1), "record": (cmd_record, 2),
+        "recordings": (cmd_recordings, 0), "relay-set": (cmd_relay_set, 1), "relay": (cmd_relay, 2),
+        "relay-stop": (cmd_relay_stop, 1), "relays": (cmd_relays, 0),
+    }
+    if c == "list":
+        return cmd_list("--json" in rest)
+    if c not in table or len(rest) < table[c][1]:
+        die(__doc__, 2)
+    try:
+        table[c][0](*rest)
+    except RuntimeError as e:
+        die(str(e))
+    except subprocess.TimeoutExpired:
+        die("the stream did not answer in time")
+
+
+if __name__ == "__main__":
+    main()
